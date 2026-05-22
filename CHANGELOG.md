@@ -2,6 +2,20 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.25] - 2026-05-22
+
+### Added: Opik LLM evaluation platform fingerprint
+
+**Opik** (Comet ML, default ports: 5173, 80, 443, 8080):
+- `GET /api/v1/private/projects` → `{"page":N,"total":N,"content":[...]}` — conjunctive on `status_code:200` + `json_field:total` + `json_field:content`. Path `/api/v1/private/` is Opik-specific (not shared with Langfuse or other observability platforms).
+- `GET /` → `body_contains:Comet Opik` fallback for deployments behind a reverse proxy that gates the API but exposes the SPA.
+- Fingerprinted live against 80.79.202.18:5173 (Opik v1.10.13) during 2026-05-22 ClimateGPT/vLLM session. Nginx SPA on :5173; VITE_BASE_API_URL="/api" confirmed via JS-bundle extraction.
+- Auth: `OPIK_AUTHENTICATION_ENABLED=false` is the shipped default → fully unauthenticated API on fresh deploy.
+- Severity: high. `/api/v1/private/projects`, `/api/v1/private/traces`, `/api/v1/private/spans` expose LLM evaluation run history, prompt/response pairs, token counts, scores, and dataset contents.
+- Port 5173 was already in `port_classes.go`; this fingerprint makes Opik a named target at that port.
+
+---
+
 ## [v1.9.24] - 2026-05-22
 
 ### Added: Evidently ML Monitoring fingerprint (LLM observability stragglers)

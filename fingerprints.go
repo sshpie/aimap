@@ -1116,6 +1116,26 @@ var Fingerprints = []Fingerprint{
 		Severity: "high",
 	},
 	{
+		// Opik — Comet ML open-source LLM evaluation + tracing platform.
+		// Self-hosted default: nginx SPA on :5173, backend at /api/v1/private/*.
+		// Auth: OPIK_AUTHENTICATION_ENABLED=false ships as default → fully unauth API.
+		// Identity confirmed live 2026-05-22 on 80.79.202.18 (DTN Amsterdam, NL).
+		Name:         "Opik",
+		DefaultPorts: []int{5173, 80, 443, 8080},
+		Probes: []Probe{
+			{Path: "/api/v1/private/projects", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "total"},
+				{Type: "json_field", Field: "content"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Comet Opik"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
 		Name:         "Dify",
 		DefaultPorts: []int{80, 5001, 3000},
 		Probes: []Probe{
