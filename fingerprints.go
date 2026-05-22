@@ -1136,6 +1136,24 @@ var Fingerprints = []Fingerprint{
 		Severity: "high",
 	},
 	{
+		// PromptLayer — LLM prompt versioning + evaluation platform (SaaS).
+		// Identity anchored on the bundle route name "organizations-with-workspace-and-invites"
+		// — a PromptLayer-specific internal route that appears in every SPA bundle.
+		// The webhook-leak finding class (Make.com webhook URLs hardcoded in bundle)
+		// is surfaced by the secret scanner, not this fingerprint.
+		// Severity: high (unauth bundle disclosure + webhook secrets; Insight #10 class).
+		Name:         "PromptLayer",
+		DefaultPorts: []int{80, 443, 3000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "organizations-with-workspace-and-invites"},
+				{Type: "body_contains", Value: "PromptLayer"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
 		Name:         "Dify",
 		DefaultPorts: []int{80, 5001, 3000},
 		Probes: []Probe{
