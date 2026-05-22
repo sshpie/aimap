@@ -61,7 +61,14 @@ var Fingerprints = []Fingerprint{
 		Name:         "ChromaDB",
 		DefaultPorts: []int{8000},
 		Probes: []Probe{
+			// v2 API (ChromaDB >= 1.0.0) — path moved from /api/v1 to /api/v2
+			{Path: "/api/v2/heartbeat", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "nanosecond heartbeat"},
+			}},
+			// v1 API fallback (ChromaDB < 1.0.0)
 			{Path: "/api/v1/heartbeat", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "nanosecond heartbeat"},
 			}},
 			{Path: "/api/v1/collections", Matches: []MatchCond{
