@@ -1594,6 +1594,69 @@ var Fingerprints = []Fingerprint{
 		Severity: "medium",
 	},
 	{
+		// LangGraph Server — LangChain's stateful-agent execution runtime.
+		// Source-verified against live instance (jiaotong-2026-05-07):
+		// GET / → {"service":"LangGraph Pipelines Service","version":"1.0.0","pipeline_id":"..."}
+		// Default port 2024 is from `langgraph dev` CLI; 8123 is the legacy Studio port.
+		// Unauth exposure: full thread history (/v1/threads), graph definitions (/graphs),
+		// and agent conversation state. Operator-IP: pipeline_id names the agent graph.
+		// Auth: no auth concept in dev mode; intended for localhost single-user use.
+		Name:         "LangGraph Server",
+		DefaultPorts: []int{2024, 8123, 8000, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "service"},
+				{Type: "body_contains", Value: "LangGraph"},
+			}},
+			{Path: "/info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "langgraph"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// SuperAGI — self-hosted controllable autonomous agent framework.
+		// Next.js frontend (port 3000) + FastAPI backend (port 8001).
+		// HTML title "SuperAGI" is the primary identity anchor.
+		// /api/v1/agents returns agent list with goals + tool assignments = agentic
+		// workflow disclosure. 40% of population auth-gated (HTTP 401 on API);
+		// 60% open in the 2026-05-16 survey sample.
+		Name:         "SuperAGI",
+		DefaultPorts: []int{3000, 8001, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "SuperAGI"},
+			}},
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "superagi"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// AgentGPT (Reworkd) — browser-based autonomous agent SPA.
+		// No JSON API identity endpoint; fingerprint is HTML-only.
+		// "reworkd" is the maker name and appears in bundle paths (/_next/static/reworkd/).
+		// Auth: none — all 12 confirmed Shodan hits return 200 with zero 401s.
+		// Impact: agent run history + task graphs disclosed; /api/agent endpoints if exposed.
+		Name:         "AgentGPT",
+		DefaultPorts: []int{3000, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "AgentGPT"},
+				{Type: "body_contains", Value: "reworkd"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
 		Name: "Mem0",
 		// Default is 8888 in upstream docs, but field-validated 2026-05-13
 		// against 45.77.183.19:8000 and other Shodan hits that run Mem0

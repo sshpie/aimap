@@ -2,6 +2,35 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.23] - 2026-05-21
+
+### Added: LangGraph Server, SuperAGI, AgentGPT fingerprints (cat-06 agent framework stragglers)
+
+Three new fingerprints for the agent-framework stragglers category (cat-06).
+Source-researched and cross-validated against the 2026-05-16 survey case study
+and a live LangGraph Server instance (jiaotong-2026-05-07).
+
+**LangGraph Server** (default ports: 2024, 8123, 8000, 80, 443):
+- `GET /` → `{"service":"LangGraph Pipelines Service","version":"1.0.0","pipeline_id":"..."}` — source-verified
+- `GET /info` fallback — json_field:version + body_contains:langgraph
+- Severity: high. No auth concept in dev mode; unauth = full thread history + graph definitions.
+- `pipeline_id` field names the operator's agent graph (operator-attribution rich).
+
+**SuperAGI** (default ports: 3000, 8001, 80, 443):
+- `GET /` → HTML body_contains:SuperAGI
+- `GET /health` → json_field:version + body_contains:superagi
+- Severity: high. 40% of 2026-05-16 sample auth-gated; 60% open. `/api/v1/agents` discloses full agent roster + goals + tool assignments.
+
+**AgentGPT** (default ports: 3000, 80, 443):
+- `GET /` → body_contains:AgentGPT + body_contains:reworkd (conjunctive — two anchors required)
+- Severity: high. SPA-only; no JSON identity endpoint. All 12 confirmed Shodan hits returned 200/no-auth in 2026-05-16 survey.
+
+**Skipped (documented):**
+- CrewAI Studio — library not server; no canonical HTTP surface to fingerprint.
+- Goose (Block) — desktop-first local agent runner; no server deployment mode.
+
+Cross-reference: Survey cat-06 2026-05-21, Insight #21 (port-first beats brand-dork for low-footprint platforms).
+
 ## [v1.9.22] - 2026-05-19
 
 ### Added: sub2api fingerprint + `-ports-class` profiles
