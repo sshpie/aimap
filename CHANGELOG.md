@@ -2,6 +2,19 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.24] - 2026-05-22
+
+### Added: Evidently ML Monitoring fingerprint (LLM observability stragglers)
+
+**Evidently ML Monitoring** (default ports: 8000, 3000, 80, 443, 8080):
+- `GET /api/version` → `{"application":"Evidently UI","version":"...","commit":"..."}` — exact string `Evidently UI` in the `application` JSON field. Unambiguous; available unauthenticated on default deploy.
+- Fingerprinted live against `evidently/evidently-service:latest` (v0.7.21) during the 2026-05-22 Evidently population survey.
+- Auth posture: Tier-A (no auth concept). `/api/version` and `/api/projects` both 200 with no credentials on fresh install.
+- Severity: high. `/api/projects/{id}/...` tree exposes ML experiment configurations, model evaluation scores, data drift reports, and dataset references.
+- Shodan dorks catalogued in `shodan/queries/24-observability.md`.
+
+---
+
 ## [v1.9.23] - 2026-05-21
 
 ### Added: LangGraph Server, SuperAGI, AgentGPT fingerprints (cat-06 agent framework stragglers)

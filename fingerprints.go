@@ -2414,6 +2414,27 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "high",
 	},
+	// ── LLM observability stragglers (Sessions 30+, 2026-05-22) ─────
+	{
+		Name: "Evidently ML Monitoring",
+		// Primary source: github.com/evidentlyai/evidently, evidently/ui/service/
+		// Default deploy: `evidently ui --host 0.0.0.0 --port 8000`
+		// /api/version always 200 with exact JSON body containing "Evidently UI"
+		// as the `application` field — not present in any other platform.
+		// /api/projects always 200 (no auth concept in default deploy) returning
+		// a JSON array of project objects (may be empty on fresh instance).
+		// Fingerprinted live against evidently/evidently-service:latest (v0.7.21)
+		// on 2026-05-22 during the Evidently population survey.
+		DefaultPorts: []int{8000, 3000, 80, 443, 8080},
+		Probes: []Probe{
+			{Path: "/api/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Evidently UI"},
+				{Type: "json_field", Field: "version"},
+			}},
+		},
+		Severity: "high",
+	},
 	// ── Medical & edge AI (Survey 28, 2026-05-15) ───────────────────
 	{
 		Name: "MONAI Label Server",
