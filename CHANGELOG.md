@@ -2,6 +2,34 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.26] - 2026-05-22
+
+### Added: Rasa chatbot framework fingerprint + enumerator
+
+**Rasa** (default port 5005; also covers 80/443/8080 for proxied deployments):
+
+Rasa Open Source ships with no authentication on `/webhooks/rest/webhook` by default.
+Operators must explicitly configure a token in `credentials.yml`; most do not.
+Population survey 2026-05-22: 98/196 (50%) confirmed unauthenticated, 0 auth-gated.
+Operator classes confirmed: government (ODPC Kenya / odpc.go.ke), electricity utilities
+(LECO Sri Lanka, Uludağ Elektrik), insurance (HNBGI), payment validation, education.
+Versions confirmed in corpus: 2.8.0, 3.5.10, 3.6.20, 3.9.6.
+
+**Fingerprint (three-conjunct, Insight #6 discipline):**
+- Primary: `GET /` → `body_contains:"Hello from Rasa:"` — product-unique version banner
+- Secondary: `GET /status` → `json_field:model_file` — Rasa-specific status schema
+- Tertiary: `GET /webhooks/rest/webhook` → `status_code:405` + `header_contains:Allow:GET` — confirms webhook endpoint exists without triggering a POST interaction
+
+**Enumerator:**
+- Extracts version string from GET / banner
+- Extracts model file path from GET /status (LOW: internal naming disclosed)
+- Auth check: POST /webhooks/rest/webhook with probe message → `auth_status: none` or `required`
+- HIGH finding on unauthenticated webhook with remediation: "Set a token in credentials.yml"
+
+Severity: high.
+
+---
+
 ## [v1.9.25] - 2026-05-22
 
 ### Added: Opik LLM evaluation platform fingerprint
