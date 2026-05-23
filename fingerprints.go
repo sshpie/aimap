@@ -2667,6 +2667,47 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "critical",
 	},
+
+	// ── Chatbot frameworks ───────────────────────────────────────────────
+
+	// Rasa Open Source — conversational AI framework. Default port 5005.
+	// Rasa ships with NO authentication on the REST webhook channel by default;
+	// operators must explicitly configure a token in credentials.yml.
+	// Population survey 2026-05-22: 98/196 (50%) confirmed unauth, 0 auth-gated.
+	// Three-conjunct marker (Insight #6 discipline):
+	//   1. GET / → "Hello from Rasa: X.Y.Z" (product-unique banner)
+	//   2. /status → JSON with model_file field
+	//   3. /webhooks/rest/webhook GET → 405 Method Not Allowed
+	//      (confirms endpoint exists without triggering a POST interaction)
+	// Confirmed operator classes: government (ODPC Kenya), utilities (LECO Sri Lanka,
+	// Uludağ Elektrik), insurance (HNBGI), payment validation, education.
+	// Versions confirmed: 2.8.0, 3.5.10, 3.6.20, 3.9.6.
+	{
+		Name:         "Rasa",
+		DefaultPorts: []int{5005, 80, 443, 8080},
+		Probes: []Probe{
+			// Primary: version banner on root. "Hello from Rasa: X.Y.Z" is
+			// product-unique — no framework or middleware emits this string.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Hello from Rasa:"},
+			}},
+			// Secondary: /status returns model file path + training job count.
+			// json_field "model_file" is Rasa-specific; absent on any other platform.
+			{Path: "/status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "model_file"},
+			}},
+			// Tertiary: /webhooks/rest/webhook existence probe (GET → 405 Allow: GET).
+			// 405 with Allow:GET confirms the POST endpoint exists without triggering
+			// a bot interaction. Rasa returns 405 on GET to the webhook path.
+			{Path: "/webhooks/rest/webhook", Matches: []MatchCond{
+				{Type: "status_code", Value: "405"},
+				{Type: "header_contains", Field: "Allow", Value: "GET"},
+			}},
+		},
+		Severity: "high",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────

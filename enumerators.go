@@ -148,6 +148,9 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"DeepEval Server":       enumDeepEval,
 	"LangSmith Self-Hosted": enumLangSmith,
 
+	// Chatbot frameworks
+	"Rasa": enumRasa,
+
 	// Voice / Audio AI
 	"AI TTS Server": enumTTS,
 
@@ -4140,5 +4143,71 @@ func urlQuery(q string) string {
 		"=", "%3D",
 	)
 	return repl.Replace(q)
+}
+
+// ── Rasa (v1.9.23) ──────────────────────────────────────────────────
+// Rasa Open Source conversational AI framework. Default port 5005.
+// Ships with NO authentication on the REST webhook channel by default.
+// Population survey 2026-05-22: 98/196 (50%) unauth, 0 auth-gated.
+// Operator classes confirmed: government (ODPC Kenya), utilities, insurance, payment.
+
+func enumRasa(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+
+	// Version — GET / returns "Hello from Rasa: X.Y.Z"
+	if st, _, body, err := httpGET(c, b+"/"); err == nil && st == 200 {
+		bodyStr := string(body)
+		if idx := strings.Index(bodyStr, "Hello from Rasa:"); idx >= 0 {
+			version := strings.TrimSpace(bodyStr[idx+len("Hello from Rasa:"):])
+			// Trim HTML and excess content
+			if end := strings.IndexAny(version, "\n<"); end > 0 {
+				version = strings.TrimSpace(version[:end])
+			}
+			r.Details = append(r.Details, "Version: "+version)
+		}
+	}
+
+	// Model metadata — GET /status returns {"model_file":"...","num_active_training_jobs":N}
+	if st, _, body, err := httpGET(c, b+"/status"); err == nil && st == 200 {
+		if m, parseErr := parseJSON(body); parseErr == nil {
+			if modelFile, ok := m["model_file"].(string); ok && modelFile != "" {
+				r.Details = append(r.Details, "Model: "+modelFile)
+				r.Findings = append(r.Findings, Finding{
+					Category: "info-leak",
+					Title:    "Model file path exposed via /status",
+					Detail:   fmt.Sprintf("Model: %s — internal naming conventions disclosed without auth.", modelFile),
+					Severity: "low",
+				})
+			}
+		}
+	}
+
+	// Auth check — POST /webhooks/rest/webhook with a minimal probe message.
+	// 200 + JSON array with recipient_id = unauthenticated.
+	// 401/403 = auth configured.
+	probeBody := []byte(`{"sender":"aimap-probe","message":"hello"}`)
+	if st, _, body, err := httpPOST(c, b+"/webhooks/rest/webhook", "application/json", probeBody); err == nil {
+		switch st {
+		case 200:
+			r.AuthStatus = "none"
+			bodyStr := string(body)
+			// Confirm it's a real Rasa response (recipient_id field)
+			if strings.Contains(bodyStr, "recipient_id") {
+				r.Findings = append(r.Findings, Finding{
+					Category: "unauth-access",
+					Title:    "Unauthenticated Rasa webhook — direct bot invocation",
+					Detail:   "POST /webhooks/rest/webhook returns bot responses without authentication. Any caller can inject messages and read responses. Set a token in credentials.yml to require auth.",
+					Severity: "high",
+				})
+			}
+		case 401, 403:
+			r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+		default:
+			r.AuthStatus = fmt.Sprintf("unknown (HTTP %d)", st)
+		}
+	}
+
+	return r
 }
 
