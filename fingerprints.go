@@ -1633,20 +1633,33 @@ var Fingerprints = []Fingerprint{
 	},
 	{
 		// LangGraph Server — LangChain's stateful-agent execution runtime.
-		// Source-verified against live instance (jiaotong-2026-05-07):
-		// GET / → {"service":"LangGraph Pipelines Service","version":"1.0.0","pipeline_id":"..."}
-		// Default port 2024 is from `langgraph dev` CLI; 8123 is the legacy Studio port.
-		// Unauth exposure: full thread history (/v1/threads), graph definitions (/graphs),
-		// and agent conversation state. Operator-IP: pipeline_id names the agent graph.
-		// Auth: no auth concept in dev mode; intended for localhost single-user use.
+		// Survey-38 (2026-05-25): 16 hosts probed, 16/16 unauthenticated. Root key varies by operator:
+		//   {"message":"LangGraph Conversational Stock Analyzer API is running"}
+		//   {"message":"Docu Companion LangGraph API","version":"3.0.0"}
+		//   {"status":"ok","bot":"modengy_v3","engine":"LangGraph"}
+		//   {"ok":true,"service":"Sleep Doctor Service","chat_service":"wuji-langgraph"}
+		//   {"service":"standalone-langgraph-server","version":"1.0.0"}
+		// uvicorn Server header present on 15/16 hosts; primary anchor for FP reduction.
+		// x-trace-id response header present on 2/16 (LangChain-managed infra only).
+		// Partial-auth failure class confirmed: auth on list endpoints (/assistants, /threads),
+		// none on individual resource endpoints (/threads/{id}, /runs/{id}) — Stock.ai / EMOR AI.
+		// Default port 2024 is from `langgraph dev` CLI; 8123 is legacy Studio port; 8000 is prod default.
 		Name:         "LangGraph Server",
 		DefaultPorts: []int{2024, 8123, 8000, 80, 443},
 		Probes: []Probe{
+			// uvicorn + "LangGraph" body — covers 14/16 survey-38 hosts, highest precision
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "header_contains", Field: "Server", Value: "uvicorn"},
+				{Type: "body_contains", Value: "LangGraph"},
+			}},
+			// json_field anchor for "service" key variant without uvicorn header
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "service"},
 				{Type: "body_contains", Value: "LangGraph"},
 			}},
+			// /info endpoint on canonical LangGraph server
 			{Path: "/info", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "version"},
