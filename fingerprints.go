@@ -2681,6 +2681,43 @@ var Fingerprints = []Fingerprint{
 		Severity: "critical",
 	},
 
+	// ── Redis management GUI ─────────────────────────────────────────────
+
+	// RedisInsight — Redis official GUI by Redis Ltd. Default port 8001 (older
+	// v1 releases); v2 (RedisInsight 2.x) ships on port 5540 but also listens
+	// on 8001 in many Docker deployments. The /api/databases endpoint returns
+	// connection records including plaintext passwords in the `password` field —
+	// no authentication required on a default install.
+	// Insight #61 (2026-05-26): 7/27 responsive instances leaked Redis credentials.
+	// Three-conjunct fingerprint (Insight #6 discipline):
+	//   1. /api/info → json_field:"version" (product-unique key in RedisInsight API)
+	//   2. /api/databases → status_code 200 + json_array (returns [] or [...] always)
+	//   3. / → body_contains:"RedisInsight" (SPA title tag)
+	{
+		Name:         "RedisInsight",
+		DefaultPorts: []int{5540, 8001, 8080, 80, 443},
+		Probes: []Probe{
+			// Primary: /api/info is RedisInsight-specific; returns {"version":"X.Y.Z",...}.
+			// No other Redis-adjacent service uses this exact path with a version field.
+			{Path: "/api/info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+			}},
+			// Secondary: /api/databases returns the connection list (array, possibly empty).
+			// json_array match fires on [] and [...].
+			{Path: "/api/databases", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+			}},
+			// Tertiary: SPA root contains "RedisInsight" in the title.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "RedisInsight"},
+			}},
+		},
+		Severity: "critical",
+	},
+
 	// ── Chatbot frameworks ───────────────────────────────────────────────
 
 	// Rasa Open Source — conversational AI framework. Default port 5005.

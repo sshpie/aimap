@@ -2,6 +2,35 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.27] - 2026-05-26
+
+### Added: RedisInsight fingerprint + enumerator (Insight #61)
+
+**RedisInsight** (default ports: 5540 for v2, 8001 for v1/Docker; also covers 80/443/8080):
+
+RedisInsight ships with no authentication on a default install. `GET /api/databases`
+returns connection records — including the `password` field in plaintext — with no
+credentials required. Insight #61 (2026-05-26): 7 of 27 responsive instances in the
+corpus leaked Redis credentials this way.
+
+**Fingerprint (three-conjunct, Insight #6 discipline):**
+- Primary: `GET /api/info` → `json_field:version` — RedisInsight-specific info endpoint
+- Secondary: `GET /api/databases` → `status_code:200` + `json_array` — connection list (empty array on fresh install, still fires)
+- Tertiary: `GET /` → `body_contains:RedisInsight` — SPA title fallback
+
+**Enumerator (`enumRedisInsight`):**
+- Extracts version + appType from `GET /api/info`
+- Calls `GET /api/databases` and parses the JSON array
+- For each connection: extracts `name`, `host`, `port`, `username`, `password`, `connectionType`, `modules[]`
+- If `password != ""`: CRITICAL finding "RedisInsight /api/databases leaked Redis credential" with full credential struct in `Data`
+- If connections present but no passwords: HIGH finding (metadata still exposed)
+- All connection records stored in `raw_data.databases`; creds also in `raw_data.leaked_credentials`
+
+Severity: critical. Verified live against 35.210.76.182:8001 — "CMS-Prod-Redis-DB"
+credential leaked on first probe.
+
+---
+
 ## [v1.9.26] - 2026-05-22
 
 ### Added: Rasa chatbot framework fingerprint + enumerator
