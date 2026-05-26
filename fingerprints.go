@@ -2773,20 +2773,16 @@ var Fingerprints = []Fingerprint{
 		Name:         "Evolution API (WhatsApp)",
 		DefaultPorts: []int{8080, 3000},
 		Probes: []Probe{
-			// Primary: root returns JSON with version + product-unique banner.
-			// Three conjuncts: status_code + json_field:version + body_contains
-			// anchors on the "I'm in the house!" string present in every
-			// Evolution API response regardless of operator customisation.
+			// Root returns {"status":"online","version":"2.x.x",...,
+			// "message":"I'm in the house!"} — the full phrase
+			// "in the house" is the product-unique anchor. "house" alone
+			// caused FP collisions against ClearML :8080 (2026-05-26).
+			// Naked /manager probe removed — status_code:200 alone fires
+			// on any service with a /manager route.
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "version"},
-				{Type: "body_contains", Value: "house"},
-			}},
-			// Secondary: /manager serves the Evolution Manager SPA.
-			// 200 on this path is Evolution-specific; standard APIs don't
-			// expose a /manager route.
-			{Path: "/manager", Matches: []MatchCond{
-				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "in the house"},
 			}},
 		},
 		Severity: "high",
