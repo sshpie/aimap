@@ -2822,6 +2822,83 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "medium",
 	},
+
+	// ── Fine-tuning frameworks ─────────────────────────────────────────────
+	// Added 2026-05-26. These hold training data, HuggingFace tokens, and
+	// base-model checkpoints — severity: high across the category.
+	{
+		// LLaMA-Factory (hiyouga/LLaMA-Factory) — Gradio WebUI (port 7860)
+		// + FastAPI inference server (port 8000). Two independent probe paths:
+		//
+		//   GET / (port 7860) — Gradio SPA; <title> carries the brand string
+		//   "LLaMA Factory (<hostname>)". Anchored with body_contains "gradio"
+		//   (present in every Gradio app's HTML bootstrap) + the brand substring.
+		//   Confirmed against http.title:"LLaMA Factory" Shodan dork (~12 hits).
+		//
+		//   GET /v1/score/evaluation (port 8000) — LLaMA-Factory-specific POST
+		//   endpoint exposed on the FastAPI server. An unauthenticated GET returns
+		//   405 Method Not Allowed; the JSON body {"detail":"Method Not Allowed"}
+		//   is FastAPI's default 405 shape. The path /v1/score/evaluation is not
+		//   part of the OpenAI-compatible API spec and does not appear in any other
+		//   known inference server — it is LLaMA-Factory-unique.
+		//   Source: src/llamafactory/api/app.py, confirmed against docker-compose
+		//   (ports: 7860:7860, 8000:8000).
+		//
+		// NOTE: Axolotl (OpenAccess-AI-Collective/axolotl) has NO built-in HTTP
+		// server. It wraps vLLM for post-training inference, producing a standard
+		// vLLM/OpenAI-compatible endpoint with no Axolotl-specific signal.
+		// Fingerprint not added; would require single-word body match on
+		// "axolotl" (FP risk from unrelated content).
+		Name:         "LLaMA-Factory",
+		DefaultPorts: []int{7860, 8000, 80, 443},
+		Probes: []Probe{
+			// Gradio WebUI probe — title contains brand string
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "LLaMA Factory"},
+				{Type: "body_contains", Value: "gradio"},
+			}},
+			// FastAPI inference server probe — LLaMA-Factory-unique path
+			{Path: "/v1/score/evaluation", Matches: []MatchCond{
+				{Type: "status_code", Value: "405"},
+				{Type: "body_contains", Value: "Method Not Allowed"},
+				{Type: "json_field", Field: "detail"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Unsloth Studio — FastAPI backend for the Unsloth fine-tuning UI.
+		// Repo: unslothai/unsloth, studio/backend/main.py.
+		// Default port: 8888 (--port default=8888 in run.py).
+		//
+		// GET /api/health returns unauthenticated base object:
+		//   {"status":"healthy","service":"Unsloth UI Backend","chat_only":...,
+		//    "desktop_protocol_version":1,...}
+		//
+		// The "service":"Unsloth UI Backend" field is the anchor —
+		// it is a hardcoded string in main.py and does not appear in any other
+		// known service. "chat_only" is a second Unsloth-specific field
+		// (controls whether training UI is shown). Both are emitted
+		// unauthenticated to allow the Tauri watchdog and frontend bootstrap
+		// to discover the backend before auth is available.
+		// Source: studio/backend/main.py line ~550, health_check().
+		//
+		// Exposure: training data, HuggingFace tokens in the model download
+		// flow, exported fine-tuned weights, and training configuration
+		// (dataset paths, hyperparameters) are accessible once auth is bypassed
+		// or on instances left with default credentials.
+		Name:         "Unsloth Studio",
+		DefaultPorts: []int{8888, 8000, 8080, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "chat_only"},
+				{Type: "body_contains", Value: "Unsloth UI Backend"},
+			}},
+		},
+		Severity: "high",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────
