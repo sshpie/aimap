@@ -1579,6 +1579,7 @@ var Fingerprints = []Fingerprint{
 			{Path: "/api/version", Matches: []MatchCond{
 				{Type: "json_field", Field: "error"},
 				{Type: "body_contains", Value: "X-API-Key header"},
+				{Type: "json_field", Field: "documentation"},
 			}},
 		},
 		Severity: "high",
@@ -2777,10 +2778,13 @@ var Fingerprints = []Fingerprint{
 		DefaultPorts: []int{5540, 8001, 8080, 80, 443},
 		Probes: []Probe{
 			// Primary: /api/info is RedisInsight-specific; returns {"version":"X.Y.Z",...}.
-			// No other Redis-adjacent service uses this exact path with a version field.
+			// Requires body_contains "RedisInsight" to prevent FP against any FastAPI
+			// service that exposes /api/info with a version field (2026-05-26: Collision
+			// Analytics API at 5.78.111.11:8001 triggered this probe — false positive).
 			{Path: "/api/info", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "RedisInsight"},
 			}},
 			// Secondary: /api/databases returns the connection list (array, possibly empty).
 			// json_array match fires on [] and [...].
