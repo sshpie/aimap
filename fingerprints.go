@@ -2758,6 +2758,39 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "high",
 	},
+
+	// ── WhatsApp automation ──────────────────────────────────────────────
+	{
+		// Evolution API — open-source WhatsApp automation framework.
+		// Default port 8080. Root endpoint returns JSON with status, version,
+		// and clientName fields. "I'm in the house!" is the product-unique
+		// banner string; no other service emits it.
+		// Exposed Evolution API gives unauthenticated access to WhatsApp session
+		// management: create/destroy sessions, send messages, read conversation
+		// history, extract QR codes for session hijacking. Severity: high.
+		// First confirmed live: 192.169.81.2:8080 (bmaconnect.com.br, Brazilian
+		// WhatsApp SaaS) — 2026-05-26.
+		Name:         "Evolution API (WhatsApp)",
+		DefaultPorts: []int{8080, 3000},
+		Probes: []Probe{
+			// Primary: root returns JSON with version + product-unique banner.
+			// Three conjuncts: status_code + json_field:version + body_contains
+			// anchors on the "I'm in the house!" string present in every
+			// Evolution API response regardless of operator customisation.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "house"},
+			}},
+			// Secondary: /manager serves the Evolution Manager SPA.
+			// 200 on this path is Evolution-specific; standard APIs don't
+			// expose a /manager route.
+			{Path: "/manager", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+			}},
+		},
+		Severity: "high",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────

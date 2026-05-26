@@ -2,6 +2,25 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.28] - 2026-05-26
+
+### Added: Evolution API (WhatsApp) fingerprint
+
+**Evolution API** (default ports: 8080, 3000) — open-source WhatsApp automation
+framework. Unauthenticated access exposes WhatsApp session management: create/destroy
+sessions, send messages, read conversation history, extract QR codes for session
+hijacking.
+
+**Fingerprint (three-conjunct, Insight #6 discipline):**
+- Primary: `GET /` → `status_code:200` + `json_field:version` + `body_contains:house`
+  ("I'm in the house!" is the product-unique banner in every Evolution API response)
+- Secondary: `GET /manager` → `status_code:200` — Evolution Manager SPA path
+
+Severity: high. First confirmed live: 192.169.81.2:8080 (bmaconnect.com.br, Brazilian
+WhatsApp SaaS) — 2026-05-26.
+
+---
+
 ## [v1.9.27] - 2026-05-26
 
 ### Added: RedisInsight fingerprint + enumerator (Insight #61)
