@@ -107,6 +107,7 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"SillyTavern": enumSillyTavern,
 
 	// AI agent platforms
+	"LangGraph Server":        enumLangGraph,
 	"OpenHands":              enumOpenHands,
 	"AutoGen Studio":         enumAutoGenStudio,
 	"Anti-detect CDP server": enumAntiDetectCDP,
@@ -1852,6 +1853,121 @@ func enumMinIO(c *http.Client, svc ServiceMatch) EnumResult {
 		} else if strings.Contains(strings.ToLower(string(body)), "accessdenied") {
 			r.AuthStatus = "required"
 		}
+	}
+
+	return r
+}
+
+// ── LangGraph Server ─────────────────────────────────────────────────
+//
+// LangGraph Server is LangChain's stateful agent execution runtime.
+// Survey-38 (2026-05-25): 16/16 hosts unauthenticated. Partial-auth failure
+// class confirmed: list endpoints (/assistants, /threads) auth-gated on some
+// operators (Stock.ai / EMOR AI) while individual resource endpoints
+// (/threads/{id}, /runs/{id}) remain open. Full-open installs expose the
+// complete agent execution context: thread state, assistant configs (which
+// embed system prompts + tool definitions), and run I/O history.
+
+func enumLangGraph(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// /info — canonical identity + version endpoint on LangGraph Server.
+	// Returns {"version": "...", "license_plan": "...", ...}.
+	if st, _, body, err := httpGET(c, b+"/info"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if v := jStr(m, "version"); v != "" {
+				r.Version = v
+			}
+			if plan := jStr(m, "license_plan"); plan != "" {
+				r.Details = append(r.Details, fmt.Sprintf("License plan: %s", plan))
+			}
+		}
+	}
+
+	// /assistants — list configured assistants (agent definitions).
+	// Each assistant record embeds graph_id, config, and metadata — operator's
+	// agent topology and system-prompt configuration are exposed here.
+	if st, _, body, err := httpGET(c, b+"/assistants"); err == nil {
+		switch st {
+		case 200:
+			r.AuthStatus = "none"
+			var items []interface{}
+			if json.Unmarshal(body, &items) == nil {
+				r.Details = append(r.Details, fmt.Sprintf("Assistants exposed: %d", len(items)))
+				r.RawData["assistants_count"] = len(items)
+			}
+			r.Findings = append(r.Findings, Finding{
+				Category: "access",
+				Title:    "LangGraph Server /assistants readable without authentication",
+				Detail:   "Assistant configurations are world-readable. Each record embeds graph_id, system prompt config, and tool definitions. Reveals the operator's full agent topology.",
+				Severity: "high",
+			})
+		case 401, 403:
+			r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+		}
+	}
+
+	// /threads — list agent threads (conversation/execution state).
+	// Thread records carry checkpoint state, which includes message history
+	// and intermediate tool call outputs.
+	if st, _, body, err := httpGET(c, b+"/threads"); err == nil {
+		switch st {
+		case 200:
+			r.AuthStatus = "none"
+			var items []interface{}
+			if json.Unmarshal(body, &items) == nil {
+				r.Details = append(r.Details, fmt.Sprintf("Threads exposed: %d", len(items)))
+				r.RawData["threads_count"] = len(items)
+			}
+			r.Findings = append(r.Findings, Finding{
+				Category: "data",
+				Title:    "LangGraph Server /threads readable without authentication",
+				Detail:   "Agent thread list is world-readable. Thread state includes full message history and tool call I/O from every agent execution — user prompts and model outputs exposed.",
+				Severity: "high",
+			})
+		case 401, 403:
+			if r.AuthStatus == "unknown" {
+				r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+			}
+		}
+	}
+
+	// /runs — list recent agent runs across all threads.
+	// Present on some deployments; reveals execution volume and timing.
+	if st, _, body, err := httpGET(c, b+"/runs"); err == nil && st == 200 {
+		r.AuthStatus = "none"
+		var items []interface{}
+		if json.Unmarshal(body, &items) == nil {
+			r.Details = append(r.Details, fmt.Sprintf("Runs exposed: %d", len(items)))
+			r.RawData["runs_count"] = len(items)
+		}
+		r.Findings = append(r.Findings, Finding{
+			Category: "data",
+			Title:    "LangGraph Server /runs readable without authentication",
+			Detail:   "Agent run list is world-readable. Reveals execution cadence, run status, and cross-thread activity.",
+			Severity: "medium",
+		})
+	}
+
+	// Partial-auth detection: if /assistants or /threads returned 401/403 but
+	// /info or /runs was open, flag the partial-auth pattern explicitly.
+	if r.AuthStatus != "none" && r.AuthStatus != "unknown" {
+		// At least one list endpoint is auth-gated; confirm whether the root
+		// is still open (partial-auth failure class from survey-38).
+		if st, _, _, err := httpGET(c, b+"/"); err == nil && st == 200 {
+			r.Findings = append(r.Findings, Finding{
+				Category: "access",
+				Title:    "LangGraph Server partial-auth: root open, list endpoints gated",
+				Detail:   "Root endpoint returns 200 unauthenticated while /assistants or /threads require auth. Survey-38 confirmed individual resource endpoints (/threads/{id}, /runs/{id}) may still be accessible without auth when list endpoints are gated — partial-auth failure class.",
+				Severity: "medium",
+			})
+		}
+	}
+
+	if r.AuthStatus == "unknown" {
+		r.AuthStatus = "auth required"
 	}
 
 	return r
