@@ -1708,6 +1708,85 @@ var Fingerprints = []Fingerprint{
 		Severity: "high",
 	},
 	{
+		// CrewAI Studio — open-source self-hosted multi-agent workflow builder.
+		// React frontend (port 3000) + FastAPI backend. No auth in default install.
+		// /api/crews returns crew configs with agent + task assignments unauth.
+		// Distinct from crewai.com vendor SaaS — those sit behind Cloudflare.
+		Name:         "CrewAI Studio",
+		DefaultPorts: []int{3000, 8000, 8080},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "CrewAI Studio"},
+			}},
+			{Path: "/api/crews", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// Agno (formerly Phidata) — agent framework playground server.
+		// The npm package name "agno-agents" embeds in React/Next.js bundle paths,
+		// giving a distinctive body_contains anchor that survives minification.
+		// /v1/playground/agents returns the agent manifest unauth in default config.
+		// Port 7777 is the upstream playground default; 3000/8000 common in deploys.
+		Name:         "Agno",
+		DefaultPorts: []int{7777, 3000, 8000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "agno-agents"},
+			}},
+			{Path: "/v1/playground/agents", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "agents"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// GPT Researcher — autonomous web research agent (FastAPI, port 8000).
+		// The Python module name "gpt_researcher" (underscore) surfaces in
+		// JS bundle import paths and static asset URLs — more distinctive than
+		// the hyphenated URL slug and survives CDN caching.
+		// /api/report is the primary generation endpoint; accessible unauth by default.
+		Name:         "GPT Researcher",
+		DefaultPorts: []int{8000, 8080},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gpt_researcher"},
+			}},
+			{Path: "/api/report", Matches: []MatchCond{
+				{Type: "status_code", Value: "405"},
+				{Type: "body_contains", Value: "method not allowed"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Devika — open-source agentic AI software engineer (Flask, port 1337).
+		// stitionai/devika: Vue.js frontend, Python Flask backend on same port.
+		// /api/agents and /api/projects return full project state unauth.
+		// "stitionai" is the org name embedded in static paths and bundle sources.
+		Name:         "Devika",
+		DefaultPorts: []int{1337, 3000, 8000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Devika"},
+				{Type: "body_contains", Value: "stitionai"},
+			}},
+			{Path: "/api/projects", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
 		Name: "Mem0",
 		// Default is 8888 in upstream docs, but field-validated 2026-05-13
 		// against 45.77.183.19:8000 and other Shodan hits that run Mem0
