@@ -2,6 +2,120 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.34] - 2026-05-27
+
+### Fixed: Agno fingerprint (3 bugs, all live-verified)
+
+Three bugs in the v1.9.32 Agno fingerprint, found and confirmed against two live CRITICAL deployments (5.78.111.11 and 34.57.75.173):
+
+1. **Wrong path.** Probe used `/v1/playground/agents` — returns `{"detail":"Not Found"}` on every real Agno deployment. Correct path: `/agents`.
+2. **Wrong probe shape.** Probe checked `json_field "agents"`, expecting `{"agents":[...]}`. The endpoint returns a top-level JSON array `[...]`. Changed to `json_array`.
+3. **Wrong anchor.** Root probe used `body_contains "agno-agents"`. That string is not present in any current live HTML or JS bundle. Shodan indexed historical content that no longer exists. New anchor: `GET /openapi.json` + `body_contains "Your multi-agent operating system."` — standard Agno playground server boilerplate, confirmed on both hosts, survives operator title changes.
+
+**Note on Shodan discovery:** `"Your multi-agent operating system."` returns 0 Shodan results. Shodan indexes port 7777 HTTP headers only (uvicorn banner); the response body is never indexed. Discovery dork remains `http.html:"agno-agents"` (port 3000 HTML, indexed on earlier crawl). The aimap probe and the Shodan dork use different anchors by necessity.
+
+### Added: `enumAgno` — agent manifest classifier
+
+Pulls `/agents`, extracts each agent's name + description + `tools.tools[].name`, and keyword-classifies data-source access across four classes:
+
+| Class | Keywords | Severity |
+|---|---|---|
+| database | postgres, mysql, mongodb, elasticsearch, redis, sqlite, database, sql | critical |
+| communications | email, gmail, outlook, slack, fireflies, transcript | critical |
+| documents | contract, sow, brd | critical |
+| project management | asana, smartsheet, salesforce, jira, hubspot | high |
+
+Tool names are the primary signal when agent descriptions are absent (host 1: no `description` field; tool `query_postgres_agent_tool` carries "postgres"). Promotes `r.RiskLevel` to "critical" on any sensitive class match. Per Insight #64: the manifest IS the finding — tool names prove data-source access without invoking a run.
+
+**Verified output — 5.78.111.11:7777 (Collision Analysis AgentOS):**
+- CRITICAL: "Agent manifest names database access: Router Agent" (keyword: "postgres")
+- HIGH: "3 agents enumerable without credentials"
+
+**Verified output — 34.57.75.173:7777 (AIRIAD Risk Advisor):**
+- CRITICAL: "Agent manifest names contract/document access: ContractAgent" (keyword: "contract")
+- CRITICAL: "Agent manifest names email/communications access: EmailsAgent" (keyword: "email")
+- HIGH: "Agent manifest names project management access: DeliveryAgent" (keyword: "asana")
+- HIGH: "5 agents enumerable without credentials"
+
+---
+
+## [v1.9.33] - 2026-05-26
+
+### Fixed: RedisInsight + Tabnine false positives (cat-06 survey)
+
+Two FPs surfaced during the cat-06 agent-framework survey:
+
+**RedisInsight FP at `5.78.111.11:8001`:** The Collision Analytics API (`/api/info` returns `{"name":..., "version":..., "status":...}`) triggered the RedisInsight probe because the original probe only checked `status_code:200` + `json_field:version`. Added `body_contains "RedisInsight"` conjunct — fires only when "RedisInsight" appears in the response body.
+
+**Tabnine Context Engine FP at `48.209.17.55:443`:** `cite.videmak.net` returns `{"error":"Unauthorized","message":"API key required. Use Authorization: Bearer <key> or X-API-Key header."}` — matching the Tabnine probe's `json_field:error` + `body_contains "X-API-Key header"`. Added `json_field:documentation` conjunct — Tabnine's actual auth-required response includes a `"documentation"` field pointing to their API docs; the videmak response does not.
+
+---
+
+## [v1.9.32] - 2026-05-26
+
+### Added: CrewAI Studio, Agno, GPT Researcher, Devika fingerprints (cat-06 stragglers)
+
+Four agent-framework fingerprints from the cat-06 survey. **Note:** the Agno fingerprint shipped with 3 bugs fixed in v1.9.34.
+
+**CrewAI Studio** (ports 3000/8000/8080): React frontend + FastAPI backend. No auth on default install. Two probes: HTML `body_contains "CrewAI Studio"` + `/api/crews` JSON array. Shodan-dark — platform has no indexable HTML/title fingerprint; SSL cert CN pivot returns vendor infra only. Severity: critical.
+
+**Agno** (ports 7777/3000/8000, formerly Phidata): Playground server ships with no auth. `/agents` returns the full agent manifest. See v1.9.34 for corrected fingerprint. Severity: high.
+
+**GPT Researcher** (port 8000/8080): FastAPI, no auth. Two probes: `body_contains "gpt_researcher"` on root (module name in JS bundle paths) + `/api/report` returns 405 (POST-only endpoint). 14/21 Shodan-seeded instances confirmed unauth. Shodan dork: `http.html:"gpt-researcher" port:8000` (hyphen form; underscore `gpt_researcher` returns 0 — not indexed as token boundary). Severity: high.
+
+**Devika** (ports 1337/3000/8000, stitionai): Flask backend, Vue.js frontend. Two conjuncts on root: `body_contains "Devika"` + `body_contains "stitionai"`. Secondary: `/api/projects` JSON array. Platform effectively defunct — 2 Shodan hits, neither confirmed. Severity: high.
+
+---
+
+## [v1.9.31] - 2026-05-26
+
+### Fixed: Evolution API FP against ClearML on port 8080
+
+The v1.9.28 Evolution API fingerprint used `body_contains "house"` as its primary anchor (from the banner "I'm in the house!"). This fired on ClearML UI responses on port 8080 which contain "house" in unrelated HTML content.
+
+**Fix:** Tightened anchor to `body_contains "in the house"` — the full unique phrase from the Evolution API banner. Removed the secondary `/manager` probe (`status_code:200` only) — too broad, fires on any service with a `/manager` route.
+
+---
+
+## [v1.9.30] - 2026-05-26
+
+### Added: LLaMA-Factory + Unsloth Studio fingerprints (cat-04 stragglers)
+
+**LLaMA-Factory** (ports 7860/8080/8000/3000): Gradio-based fine-tuning UI. Two probes: HTML title `body_contains "LLaMA Factory"` (Gradio SPA title) + `/api/v1/score/evaluation` returns 405 (POST-only endpoint unique to LLaMA-Factory). Severity: high.
+
+**Unsloth Studio** (ports 8000/8080/3000): Fine-tuning UI with REST backend. Primary probe: `/api/health` → `json_field:service` + `body_contains "Unsloth UI Backend"`. Secondary: `/api/health` → `json_field:chat_only`. Severity: high.
+
+**Axolotl:** No HTTP server component — CLI-only tool. No fingerprint added per anchoring discipline (no probe target exists).
+
+---
+
+## [v1.9.29] - 2026-05-26
+
+### Added: Chain B keyspace probe, Apollo GraphQL fingerprint + enumerator, 24 unit tests
+
+**Chain B keyspace probe (`enum_redis_keyspace.go`):**
+
+After `enumRedisInsight` extracts a Redis credential from `/api/databases`, it calls `redisChainBProbe` to connect directly to Redis and scan keyspace patterns without reading values. Six pattern classes:
+
+| Pattern | Data class | Severity |
+|---|---|---|
+| `bull:*` | Bull/BullMQ job queues (queue names extracted) | HIGH |
+| `_kombu.*` | Celery/Kombu task queues (bound queue list) | MEDIUM |
+| `fsm:*:aiogd:*` | aiogram Telegram FSM state (user IDs extracted) | MEDIUM |
+| `*EASEBUZZ*` | EaseBuzz payment gateway settings | CRITICAL |
+| `org_conns:*` | Multi-tenant DB connection strings | CRITICAL |
+| FT._LIST | Redis Stack full-text index names | INFO |
+
+Implements a minimal RESP protocol client (`respConn`) with auth, DBSIZE, SCAN, and arbitrary command support. Resolves `"localhost"` Redis hosts to `svc.Host` automatically.
+
+**Apollo GraphQL fingerprint:** `GET /graphql` → `status_code:400` + `json_field:errors` + `body_contains "cross-site request forgery"` (Apollo Server's CSRF rejection on unauthenticated GET). Two probes: `/graphql` and `/api/graphql`. Default ports: 443/80/3000/4000/8080/8000/5000. Severity: medium.
+
+**`enumGraphQL`:** Four phases: (1) confirm introspection accessible, (2) enumerate root query/mutation ops, flag data-export operations (`getCsvUrl`, `getCustomUsersCsv`, `exportUsers`, `downloadUsers`), (3) attempt unauth execution of export ops, (4) probe User type for admin flag fields (`isSuper`, `isAdmin`, `isDeveloper`). Anchored on djaminn.app (getCustomUsersCsv → GCS signed URL, CRITICAL) and CampusIRIS (org_conns + EaseBuzz).
+
+**Unit tests (24 tests, all pass):** `extractBullQueueNames` (6), `extractCeleryQueueNames` (4), `extractTelegramUserIDs` (5), `isNumericID` (1), `gqlFieldNames` (7), `gqlFieldNamesFlat` (1).
+
+---
+
 ## [v1.9.28] - 2026-05-26
 
 ### Added: Evolution API (WhatsApp) fingerprint

@@ -1735,6 +1735,12 @@ var Fingerprints = []Fingerprint{
 		// /agents returns a top-level JSON array (not an object); each element has
 		// id, name, model, and tools.tools[].name revealing data-source access.
 		// Port 7777 is the upstream playground default; 3000/8000 common in deploys.
+		//
+		// Shodan note: "Your multi-agent operating system." returns 0 Shodan results.
+		// Shodan indexes port 7777 HTTP headers only (uvicorn banner) — the JSON body
+		// never lands in the index. Discovery dork: http.html:"agno-agents" (port 3000
+		// HTML; Shodan indexed it on an earlier crawl even though the string is absent
+		// from current live responses). Probe and dork intentionally use different anchors.
 		Name:         "Agno",
 		DefaultPorts: []int{7777, 3000, 8000},
 		Probes: []Probe{
