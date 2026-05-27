@@ -107,6 +107,7 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"SillyTavern": enumSillyTavern,
 
 	// AI agent platforms
+	"Agno":                    enumAgno,
 	"LangGraph Server":        enumLangGraph,
 	"OpenHands":              enumOpenHands,
 	"AutoGen Studio":         enumAutoGenStudio,
@@ -1866,6 +1867,102 @@ func enumMinIO(c *http.Client, svc ServiceMatch) EnumResult {
 
 // ── LangGraph Server ─────────────────────────────────────────────────
 //
+// ── Agno ─────────────────────────────────────────────────────────────
+// Agno (formerly Phidata) playground server. Ships with no auth. /agents
+// returns a top-level JSON array of agent objects. Each agent carries its
+// name, optional description, and a tools.tools[] array whose member names
+// reveal the data sources the agent can reach (e.g. query_postgres_agent_tool,
+// get_fireflies_transcripts). Insight #64: the manifest IS the finding.
+
+func enumAgno(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "none"
+
+	st, _, body, err := httpGET(c, b+"/agents")
+	if err != nil || st != 200 {
+		r.Findings = append(r.Findings, Finding{
+			Category: "auth", Title: "Agno playground API open — /agents unreachable",
+			Severity: "high",
+		})
+		return r
+	}
+
+	var agents []map[string]interface{}
+	if jsonErr := json.Unmarshal(body, &agents); jsonErr != nil {
+		return r
+	}
+
+	r.Details = append(r.Details, fmt.Sprintf("Agents: %d", len(agents)))
+
+	type kwClass struct {
+		keywords []string
+		category string
+		label    string
+		severity string
+	}
+	classes := []kwClass{
+		{[]string{"postgres", "mysql", "mongodb", "elasticsearch", "redis", "sqlite", "database", "sql"}, "database", "database", "critical"},
+		{[]string{"email", "gmail", "outlook", "slack", "fireflies", "transcript"}, "communications", "email/communications", "critical"},
+		{[]string{"contract", "sow", "brd"}, "documents", "contract/document", "critical"},
+		{[]string{"asana", "smartsheet", "salesforce", "jira", "hubspot"}, "project_mgmt", "project management", "high"},
+	}
+	seen := map[string]bool{}
+
+	for _, agent := range agents {
+		name := jStr(agent, "name")
+		blob := strings.ToLower(name) + " " + strings.ToLower(jStr(agent, "description"))
+
+		var toolNames []string
+		if toolsObj, ok := agent["tools"].(map[string]interface{}); ok {
+			if toolArr, ok := toolsObj["tools"].([]interface{}); ok {
+				for _, t := range toolArr {
+					if tm, ok := t.(map[string]interface{}); ok {
+						tn := jStr(tm, "name")
+						toolNames = append(toolNames, tn)
+						blob += " " + strings.ToLower(tn)
+					}
+				}
+			}
+		}
+
+		if len(toolNames) > 0 {
+			r.Details = append(r.Details, fmt.Sprintf("  %s [%s]", name, strings.Join(toolNames, ", ")))
+		} else {
+			r.Details = append(r.Details, fmt.Sprintf("  %s", name))
+		}
+
+		for _, cls := range classes {
+			if seen[cls.category] {
+				continue
+			}
+			for _, kw := range cls.keywords {
+				if strings.Contains(blob, kw) {
+					seen[cls.category] = true
+					r.Findings = append(r.Findings, Finding{
+						Category: cls.category,
+						Title:    fmt.Sprintf("Agent manifest names %s access: %s", cls.label, name),
+						Detail:   fmt.Sprintf("keyword match: %q", kw),
+						Severity: cls.severity,
+					})
+					if cls.severity == "critical" {
+						r.RiskLevel = "critical"
+					}
+					break
+				}
+			}
+		}
+	}
+
+	r.Findings = append(r.Findings, Finding{
+		Category: "auth",
+		Title:    fmt.Sprintf("%d agents enumerable without credentials", len(agents)),
+		Severity: "high",
+	})
+
+	return r
+}
+
 // LangGraph Server is LangChain's stateful agent execution runtime.
 // Survey-38 (2026-05-25): 16/16 hosts unauthenticated. Partial-auth failure
 // class confirmed: list endpoints (/assistants, /threads) auth-gated on some

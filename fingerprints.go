@@ -1729,20 +1729,22 @@ var Fingerprints = []Fingerprint{
 	},
 	{
 		// Agno (formerly Phidata) — agent framework playground server.
-		// The npm package name "agno-agents" embeds in React/Next.js bundle paths,
-		// giving a distinctive body_contains anchor that survives minification.
-		// /v1/playground/agents returns the agent manifest unauth in default config.
+		// /openapi.json carries the boilerplate description "Your multi-agent
+		// operating system." on both confirmed deployments; this is Agno's
+		// standard playground server description and survives operator title changes.
+		// /agents returns a top-level JSON array (not an object); each element has
+		// id, name, model, and tools.tools[].name revealing data-source access.
 		// Port 7777 is the upstream playground default; 3000/8000 common in deploys.
 		Name:         "Agno",
 		DefaultPorts: []int{7777, 3000, 8000},
 		Probes: []Probe{
-			{Path: "/", Matches: []MatchCond{
+			{Path: "/openapi.json", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
-				{Type: "body_contains", Value: "agno-agents"},
+				{Type: "body_contains", Value: "Your multi-agent operating system."},
 			}},
-			{Path: "/v1/playground/agents", Matches: []MatchCond{
+			{Path: "/agents", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
-				{Type: "json_field", Field: "agents"},
+				{Type: "json_array"},
 			}},
 		},
 		Severity: "high",
