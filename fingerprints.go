@@ -1377,7 +1377,9 @@ var Fingerprints = []Fingerprint{
 		Probes: []Probe{
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
-				{Type: "header_contains", Value: "X-Ratelimit-Limit"},
+				// X-Ratelimit-Limit header is injected exclusively by Argo's
+				// gRPC-gateway rate-limit middleware; empty Value = "header exists".
+				{Type: "header_contains", Field: "X-Ratelimit-Limit", Value: ""},
 				{Type: "body_contains", Value: "noindex"},
 				{Type: "body_contains", Value: "favicon-32x32.png"},
 			}},
