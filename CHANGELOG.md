@@ -2,6 +2,23 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.35] - 2026-05-27
+
+### Fixed: Argo Workflows DefaultPorts — port 443 fingerprint miss
+
+The Argo Workflows fingerprint listed only `DefaultPorts: []int{2746}`. In production,
+111 of 136 open Shodan instances (81%) serve the argo-server on **port 443** behind a
+Kubernetes LoadBalancer or ingress, not on the bare 2746 port. The fingerprint was silently
+skipped on all port-443 hits because aimap's matcher filters candidates by DefaultPorts.
+
+Fix: added 443, 80, 8080, 8443 to DefaultPorts. Empirically confirmed across 156-host survey.
+
+Root cause of missing data: aimap's DefaultPorts filter (fingerprints.go:3296–3307) is
+sound for performance but requires fingerprints to enumerate ALL commonly-observed ports,
+not just the vendor-documented default. Survey-driven port discovery is mandatory.
+
+---
+
 ## [v1.9.34] - 2026-05-27
 
 ### Fixed: Agno fingerprint (3 bugs, all live-verified)

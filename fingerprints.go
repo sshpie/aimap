@@ -1341,7 +1341,10 @@ var Fingerprints = []Fingerprint{
 		//      present in the startup struct; no auth check in GetInfo handler.
 		// Any probe matching fires the fingerprint. Severity=critical: unauth instances
 		// expose POST /api/v1/workflows (arbitrary container exec) and pod exec.
-		DefaultPorts: []int{2746},
+		// Empirically confirmed: 111 of 136 Shodan-discovered instances run on
+		// port 443 (Kubernetes ingress/LoadBalancer), not 2746 (bare server).
+		// Also include 80, 8080, 8443 for proxy-fronted deployments.
+		DefaultPorts: []int{2746, 443, 80, 8080, 8443},
 		Probes: []Probe{
 			{Path: "/api/v1/version", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
