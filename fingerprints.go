@@ -2663,6 +2663,137 @@ var Fingerprints = []Fingerprint{
 		Severity: "medium",
 	},
 
+	// Kokoro-FastAPI (remsky) — OpenAI-compatible TTS server, port 8880.
+	// No auth by default; api_key field accepts "not-needed" with no validation.
+	// /debug/system is a project-unique path not present in any other TTS server.
+	// Multiple competing Docker images in the wild (ghcr.io/remsky/kokoro-fastapi-*,
+	// hwdsl2/kokoro-server). Verified via API schema 2026-05-28.
+	{
+		Name:         "Kokoro-FastAPI",
+		DefaultPorts: []int{8880},
+		Probes: []Probe{
+			{Path: "/debug/system", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "cpu_percent"},
+			}},
+			{Path: "/v1/audio/voices", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: `"id"`},
+				{Type: "body_contains", Value: `"name"`},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Kokoro"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Chatterbox TTS Server (devnen variant) — zero-shot voice cloning, port 8000.
+	// /api/model-info returns JSON with "engine" field (e.g. "chatterbox-turbo") —
+	// distinctive differentiator from generic FastAPI TTS servers on port 8000.
+	// /upload_reference is an unauthenticated voice-clone upload surface.
+	// Severity high: voice-clone fraud, not just compute theft.
+	{
+		Name:         "Chatterbox TTS",
+		DefaultPorts: []int{8000},
+		Probes: []Probe{
+			{Path: "/api/model-info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "engine"},
+			}},
+			{Path: "/get_predefined_voices", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "voice"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "chatterbox"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Chatterbox TTS API (travisvn variant) — same model, different server wrapper.
+	// Port 4123 is near-unique to this project. /health + /config confirm identity.
+	{
+		Name:         "Chatterbox TTS API",
+		DefaultPorts: []int{4123},
+		Probes: []Probe{
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+			}},
+			{Path: "/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "chatterbox"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Chatterbox"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Orpheus-FastAPI (canopyai) — 3B-param Llama TTS with emotion tags.
+	// Port 8899 is near-unique to Orpheus deployments. No auth in default config.
+	{
+		Name:         "Orpheus-FastAPI",
+		DefaultPorts: []int{8899},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Orpheus"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			{Path: "/v1/audio/speech", Matches: []MatchCond{
+				{Type: "status_code", Value: "405"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// WhisperLive — real-time streaming ASR. Two surfaces:
+	//   1. REST API (port 8000): FastAPI with /v1/audio/transcriptions
+	//   2. WebSocket (port 9090): sends {"message":"SERVER_READY"} on connect.
+	// PII severity: operators running this for meeting transcription expose
+	// live audio streams to anyone who connects without auth.
+	{
+		Name:         "WhisperLive",
+		DefaultPorts: []int{8000, 9090},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "WhisperLive"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "nearly-live implementation"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Deepgram Self-Hosted (on-prem) — enterprise ASR. Runtime auth is OFF:
+	// NGC API key gates image pull but /v1/status and /v1/listen require no
+	// per-request auth once the container is running. /v1/status returns JSON
+	// with "system_health" field — unique to this product.
+	{
+		Name:         "Deepgram Self-Hosted",
+		DefaultPorts: []int{8080},
+		Probes: []Probe{
+			{Path: "/v1/status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "system_health"},
+				{Type: "json_field", Field: "active_batch_requests"},
+			}},
+		},
+		Severity: "critical",
+	},
+
 	// ── Embedding Services ──────────────────────────────────────────────
 
 	// HuggingFace Text Embeddings Inference (TEI) — canonical standalone
