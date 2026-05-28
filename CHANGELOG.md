@@ -2,6 +2,22 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.36] - 2026-05-27
+
+### Added: Argo Workflows (auth-enforced) identity fingerprint
+
+New fingerprint at severity=info that detects Argo Workflows instances running with
+auth enforced (--auth-mode=client/hybrid). Survey confirmed: 67 of 156 Shodan-discovered
+instances all return HTTP 401 on all API endpoints but reveal identity via the SPA root path.
+
+The discriminating signal: `X-Ratelimit-Limit` response header on `/`, injected exclusively
+by Argo's gRPC-gateway rate-limit middleware. Probe also requires `noindex` and
+`favicon-32x32.png` in the body (both present in every Argo SPA build observed).
+
+Severity=info because auth is enforced — Argo identity confirmed but no data exposure.
+
+---
+
 ## [v1.9.35] - 2026-05-27
 
 ### Fixed: Argo Workflows DefaultPorts — port 443 fingerprint miss

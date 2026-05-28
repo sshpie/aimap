@@ -1365,6 +1365,26 @@ var Fingerprints = []Fingerprint{
 		Severity: "critical",
 	},
 	{
+		// Identity-only fingerprint for auth-enforced Argo Workflows.
+		// Fires when the API returns 401 (auth required) but the SPA root
+		// reveals the X-Ratelimit-Limit header — a header injected exclusively
+		// by Argo's gRPC-gateway rate-limit middleware. Survey (2026-05-27):
+		// 67 of 156 Shodan hosts confirmed via this pattern; all auth-enforced
+		// (401 on /api/v1/version and /api/v1/userinfo). Severity=info because
+		// auth is working — version disclosure only.
+		Name:         "Argo Workflows (auth-enforced)",
+		DefaultPorts: []int{2746, 443, 80, 8080, 8443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "header_contains", Value: "X-Ratelimit-Limit"},
+				{Type: "body_contains", Value: "noindex"},
+				{Type: "body_contains", Value: "favicon-32x32.png"},
+			}},
+		},
+		Severity: "info",
+	},
+	{
 		Name: "Flyte Console",
 		// Ports: 8088 (Flyte sandbox default) and 30080 (NodePort in k8s deploys).
 		// Cadence Web also runs on 8088 — both fingerprints fire; the json_field
