@@ -3528,6 +3528,64 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "high",
 	},
+	// Kubecost: K8s FinOps cost-allocation. No auth by default. /model/clusterInfo leaks
+	// cluster name, cloud provider, account, region, and provisioner (EKS/GKE/AKS).
+	// /model/allocation returns per-namespace cost topology. /model/helmValues (HIGH) leaks
+	// full install-time Helm values including any cloud API keys or passwords passed via
+	// values — presence confirmed by probe; secret bodies are NOT read (restraint ethic).
+	// Survey-driven DefaultPorts: 80=75 hits, 9090=23, 443=18 (port 2746 pattern ≠ here).
+	// Disambiguation: /model/ prefix = Kubecost; bare /allocation at :9003 = OpenCost.
+	// Note: Shodan indexes title "Kubecost" on the nginx SPA; port 9090 bare body is not
+	// independently indexed for this dork. Use http.title:"Kubecost" + favicon hash 611531125.
+	{
+		Name:         "Kubecost",
+		DefaultPorts: []int{80, 443, 9090},
+		Probes: []Probe{
+			// Primary: /model/clusterInfo emits structured JSON with provider+provisioner+region.
+			// All three conjuncts required: status + top-level "code" key + "provisioner" string.
+			{Path: "/model/clusterInfo", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "code"},
+				{Type: "body_contains", Value: "provisioner"},
+			}},
+			// Secondary: /model/allocation with cost data — cpuCost is present in every
+			// confirmed instance regardless of whether allocation data is populated.
+			{Path: "/model/allocation?window=1d&aggregate=namespace&accumulate=true", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "code"},
+				{Type: "body_contains", Value: "cpuCost"},
+			}},
+		},
+		Severity: "high",
+	},
+	// OpenCost: CNCF cost-allocation exporter. No built-in auth (no auth scheme in swagger.json).
+	// API on :9003 (definitive); UI SPA on :9090 proxies to :9003 depending on BASE_URL.
+	// /allocation returns per-namespace cpuCost/ramCost/totalCost topology.
+	// /metrics carries kubecost_cluster_info (inherited from Kubecost codebase) + node_cpu_hourly_cost.
+	// FP exclusion: opencost.de (Universität Regensburg, German construction-cost standard)
+	// returns HTML with "Bauwerksdaten"/"Leistungsverzeichnis" — excluded by body_contains check.
+	// ETag "1.96.0" is build-time-static in opencost-ui nginx template (low FP signal).
+	{
+		Name:         "OpenCost",
+		DefaultPorts: []int{9003, 9090},
+		Probes: []Probe{
+			// Port 9003 API (definitive per Insight #52: bare 200 at path ≠ the API).
+			{Path: "/allocation?window=1d&aggregate=namespace", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "code"},
+				{Type: "body_contains", Value: "cpuCost"},
+				// Exclude opencost.de (German construction-cost registry, "openCost" namesake).
+				{Type: "body_not_contains", Value: "bauwerksdaten"},
+			}},
+			// /metrics: kubecost_cluster_info present in every OpenCost deployment.
+			{Path: "/metrics", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "node_cpu_hourly_cost"},
+				{Type: "body_not_contains", Value: "bauwerksdaten"},
+			}},
+		},
+		Severity: "medium",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────

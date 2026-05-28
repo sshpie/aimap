@@ -2,6 +2,29 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.38] - 2026-05-28
+
+### Added: Kubecost + OpenCost fingerprints
+
+Two new fingerprints for K8s FinOps cost-allocation platforms. Survey-driven
+(108 Kubecost + 28 OpenCost candidates; 67 confirmed open in first run, 49/50
+Kubecost with `/model/helmValues` exposed).
+
+**Kubecost** (`high`): DefaultPorts [80, 443, 9090] (survey-driven: 80=75
+hits, 9090=23, 443=18). Two probes: `/model/clusterInfo` (status 200 + `code`
+field + `provisioner` body string) and `/model/allocation` (status 200 + `code`
+field + `cpuCost`). The `/model/` prefix disambiguates from standalone OpenCost.
+Severity `high`: cluster topology + cloud provider/region/account + daily cost
+data visible; `/model/helmValues` leaks Helm install values (credential-leak
+class, macchaffee 2021 — confirmed present on 73% of survey corpus).
+
+**OpenCost** (`medium`): DefaultPorts [9003, 9090]. Port 9003 is the definitive
+API endpoint per Insight #52 (bare 200 at `:9090/` is the SPA shell, not the
+API). Two probes: `/allocation?window=1d&aggregate=namespace` (status 200 +
+`code` field + `cpuCost` + NOT `bauwerksdaten`); `/metrics` (`node_cpu_hourly_cost`
++ NOT `bauwerksdaten`). `body_not_contains: bauwerksdaten` excludes opencost.de
+(Universität Regensburg German construction-cost standard, confirmed FP in survey).
+
 ## [v1.9.37] - 2026-05-28
 
 ### Added: `enumLiteLLM` deep enumerator
