@@ -3276,6 +3276,127 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "high",
 	},
+
+	// ── ML Governance / Data Catalog ──────────────────────────────────────────
+	//
+	// OpenMetadata: CVE-2024-28255 (CVSS 9.8) — path parameter injection auth
+	// bypass exploited in the wild against K8s clusters. Affects all versions
+	// < 1.3.1. Chain: auth bypass → SpEL RCE → env var harvest of all connected
+	// datasource credentials. Unauthenticated /api/v1/system/version exposes
+	// version string enabling targeted exploit selection.
+	{
+		Name:         "OpenMetadata",
+		DefaultPorts: []int{8585, 8080},
+		Probes: []Probe{
+			{Path: "/api/v1/system/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "json_field", Field: "revision"},
+			}},
+		},
+		Severity: "critical",
+	},
+
+	// DataHub (LinkedIn): GMS backend (port 8080) is auth-off by default unless
+	// METADATA_SERVICE_AUTH_ENABLED=true. Even when auth is "enabled", GMS does
+	// not cryptographically verify JWT signatures — forge any user token.
+	// Default frontend credentials: datahub/datahub. The /config endpoint is
+	// unauthenticated and exposes platform version and capability flags.
+	{
+		Name:         "DataHub GMS",
+		DefaultPorts: []int{8080, 9002},
+		Probes: []Probe{
+			{Path: "/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "noCode"},
+				{Type: "body_contains", Value: "datahub"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Apache Atlas: ships admin/admin as default credentials baked into
+	// users-credentials.properties. No forced rotation. Default config disables
+	// TLS. Port 21000 is near-exclusive to Atlas in enterprise data stacks.
+	// /api/atlas/admin/version is authenticated but admin/admin is the default.
+	{
+		Name:         "Apache Atlas",
+		DefaultPorts: []int{21000, 21443},
+		Probes: []Probe{
+			{Path: "/api/atlas/admin/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "Description"},
+				{Type: "body_contains", Value: "metadata"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Amundsen (Lyft): no auth by default across all three microservices
+	// (frontend :5000, metadata API :5002, search API :5001). Auth requires
+	// manual flaskoidc configuration. Full catalog read without credentials:
+	// table schemas, ownership, PII tags, column statistics, lineage.
+	{
+		Name:         "Amundsen",
+		DefaultPorts: []int{5000, 5001, 5002},
+		Probes: []Probe{
+			{Path: "/healthcheck", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "status"},
+				{Type: "body_contains", Value: "amundsen"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Marquez (OpenLineage): no auth by default per documentation. Unauthenticated
+	// POST to /api/v1/lineage enables arbitrary lineage event injection.
+	// /api/v1/namespaces returns full namespace list; /api/v1/jobs exposes job
+	// run history including SQL query text in OpenLineage facets.
+	{
+		Name:         "Marquez",
+		DefaultPorts: []int{5000, 3000, 8080},
+		Probes: []Probe{
+			{Path: "/api/v1/namespaces", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "namespaces"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// CKAN: open data portal — read is unauthenticated by design; high value
+	// when deployed on government/enterprise data infrastructure. Resource URLs
+	// in dataset records often embed API keys or tokens from the creating user.
+	// /api/3/action/status_show is unauthenticated and exposes ckan_version.
+	{
+		Name:         "CKAN",
+		DefaultPorts: []int{5000, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/3/action/status_show", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "ckan_version"},
+				{Type: "body_contains", Value: "ckan"},
+			}},
+		},
+		Severity: "low",
+	},
+
+	// Collibra: enterprise data governance — port 4402 console. Default
+	// credentials Admin/Admin documented in quickstart; rarely rotated in
+	// enterprise on-prem deployments. Exposure: full enterprise data inventory,
+	// business glossary, lineage policies, PII classification rules.
+	{
+		Name:         "Collibra",
+		DefaultPorts: []int{4402, 4421, 4401},
+		Probes: []Probe{
+			{Path: "/rest/2.0/ping", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "collibra"},
+			}},
+		},
+		Severity: "high",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────

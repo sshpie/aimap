@@ -148,6 +148,12 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"ClickHouse":    enumClickHouse,
 	"Elasticsearch": enumElasticsearch,
 
+	// ML Governance / Data Catalog
+	"OpenMetadata": enumOpenMetadata,
+	"DataHub GMS":  enumDataHub,
+	"Apache Atlas": enumApacheAtlas,
+	"Marquez":      enumMarquez,
+
 	// AI safety / eval / guardrails
 	"Promptfoo":             enumPromptfoo,
 	"NeMo Guardrails":       enumNeMoGuardrails,
@@ -5278,4 +5284,197 @@ func argoWorkflowsScanParams(item interface{}, r *EnumResult, ns string) {
 			}
 		}
 	}
+}
+
+
+// ── ML Governance / Data Catalog enumerators ─────────────────────────────────
+
+// enumOpenMetadata enumerates OpenMetadata instances.
+// CVE-2024-28255 (CVSS 9.8): path parameter injection auth bypass exploited in
+// wild. Affects all versions < 1.3.1. /api/v1/system/version is unauthenticated
+// and exposes exact version for targeted exploit selection.
+func enumOpenMetadata(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+
+	// Version disclosure — unauthenticated on all versions
+	if st, _, body, err := httpGET(c, b+"/api/v1/system/version"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			version := jStr(m, "version")
+			revision := jStr(m, "revision")
+			r.Version = version
+			r.RawData["version"] = version
+			r.RawData["revision"] = revision
+			r.Findings = append(r.Findings, Finding{
+				Category: "version_disclosure",
+				Title:    "OpenMetadata: unauthenticated version disclosure",
+				Detail:   fmt.Sprintf("Version %s (revision %s) from /api/v1/system/version without auth. Versions < 1.3.1 are vulnerable to CVE-2024-28255 (CVSS 9.8) — auth bypass + SpEL RCE + datasource credential harvest.", version, revision),
+				Severity: "medium",
+			})
+		}
+	}
+
+	// CVE-2024-28255 auth bypass: path parameter injection
+	// GET /api/v1/tables;v1=x/ bypasses JWT validation on affected versions.
+	if st, _, body, err := httpGET(c, b+"/api/v1/tables;v1=x/"); err == nil {
+		if st == 200 && len(body) > 10 {
+			r.AuthStatus = "bypass"
+			r.Findings = append(r.Findings, Finding{
+				Category: "auth_bypass",
+				Title:    "OpenMetadata: CVE-2024-28255 auth bypass confirmed",
+				Detail:   "GET /api/v1/tables;v1=x/ returned 200 — path parameter injection bypasses JWT auth. Chain: auth bypass → SpEL RCE → env var harvest of all connected datasource credentials. Actively exploited in wild against K8s clusters. CVSS 9.8.",
+				Severity: "critical",
+			})
+			r.RawData["bypass_body_len"] = len(body)
+		}
+	}
+
+	// Table inventory depth
+	if st, _, body, err := httpGET(c, b+"/api/v1/tables?limit=1"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if paging, ok := m["paging"].(map[string]interface{}); ok {
+				r.RawData["table_count"] = paging["total"]
+			}
+		}
+	}
+
+	// Database service connections
+	if st, _, body, err := httpGET(c, b+"/api/v1/services/databaseServices?limit=25"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if data, ok := m["data"].([]interface{}); ok && len(data) > 0 {
+				r.Findings = append(r.Findings, Finding{
+					Category: "data_exposure",
+					Title:    fmt.Sprintf("OpenMetadata: %d database service connections enumerated", len(data)),
+					Detail:   "Database service list accessible without auth — exposes connection metadata, service types, and lineage config.",
+					Severity: "high",
+				})
+				r.RawData["db_service_count"] = len(data)
+			}
+		}
+	}
+
+	if r.AuthStatus == "" {
+		r.AuthStatus = "on"
+	}
+	return r
+}
+
+// enumDataHub enumerates DataHub GMS (Generalized Metadata Service) instances.
+// GMS is auth-off by default; even when METADATA_SERVICE_AUTH_ENABLED=true,
+// JWT signatures are not cryptographically verified — forge any user token.
+// Default credentials: datahub/datahub on the frontend (port 9002).
+func enumDataHub(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+
+	// Unauthenticated /config endpoint — unique to DataHub GMS
+	if st, _, body, err := httpGET(c, b+"/config"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if jHas(m, "noCode") {
+				r.AuthStatus = "none"
+				r.RawData["config"] = m
+				r.Findings = append(r.Findings, Finding{
+					Category: "auth_off",
+					Title:    "DataHub GMS: unauthenticated /config endpoint",
+					Detail:   "GMS /config returned 200 without credentials. METADATA_SERVICE_AUTH_ENABLED is likely false (default). Full org data inventory, lineage graphs, PII classification, and ingestion source configs are readable without auth.",
+					Severity: "high",
+				})
+			}
+		}
+	}
+
+	// Entity read confirmation
+	if st, _, body, err := httpGET(c, b+"/entities?urns[0]=urn:li:corpuser:datahub"); err == nil && st == 200 {
+		if len(body) > 20 {
+			r.Findings = append(r.Findings, Finding{
+				Category: "data_exposure",
+				Title:    "DataHub GMS: unauthenticated entity read confirmed",
+				Detail:   "GET /entities?urns[0]=urn:li:corpuser:datahub returned 200 with body — full entity graph readable without auth.",
+				Severity: "high",
+			})
+			r.RawData["entity_read_confirmed"] = true
+		}
+	}
+
+	if r.AuthStatus == "" {
+		r.AuthStatus = "on"
+	}
+	return r
+}
+
+// enumApacheAtlas enumerates Apache Atlas instances.
+// Default credentials admin/admin are baked into users-credentials.properties
+// and rarely rotated in enterprise deployments.
+func enumApacheAtlas(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+
+	// Version check with default admin:admin
+	req, err := http.NewRequest("GET", b+"/api/atlas/admin/version", nil)
+	if err == nil {
+		req.SetBasicAuth("admin", "admin")
+		req.Header.Set("User-Agent", "aimap/"+Version+" (security-research)")
+		resp, err2 := c.Do(req)
+		if err2 == nil {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				r.AuthStatus = "default_credentials"
+				if m, err3 := parseJSON(body); err3 == nil {
+					r.Version = jStr(m, "Version")
+					r.RawData["version"] = r.Version
+				}
+				r.Findings = append(r.Findings, Finding{
+					Category: "default_credentials",
+					Title:    "Apache Atlas: default credentials admin/admin accepted",
+					Detail:   fmt.Sprintf("Version %s. admin/admin accepted at /api/atlas/admin/version. Full Hadoop/big-data inventory, PII classification rules, Hive tables, HDFS paths, Kafka topics, and entity lineage accessible.", r.Version),
+					Severity: "critical",
+				})
+			} else if resp.StatusCode == 401 {
+				r.AuthStatus = "on"
+				r.RawData["default_creds_rejected"] = true
+			}
+		}
+	}
+
+	return r
+}
+
+// enumMarquez enumerates Marquez (OpenLineage API server) instances.
+// No auth by default. Full pipeline lineage graph is readable and writable.
+// Unauthenticated POST to /api/v1/lineage enables arbitrary lineage injection.
+func enumMarquez(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+
+	// Namespace list — unauthenticated, unique to Marquez
+	if st, _, body, err := httpGET(c, b+"/api/v1/namespaces"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if namespaces, ok := m["namespaces"].([]interface{}); ok {
+				r.AuthStatus = "none"
+				r.RawData["namespace_count"] = len(namespaces)
+				r.Findings = append(r.Findings, Finding{
+					Category: "auth_off",
+					Title:    fmt.Sprintf("Marquez: %d namespaces readable without authentication", len(namespaces)),
+					Detail:   "GET /api/v1/namespaces returned namespace list without auth. Full pipeline lineage — job names, dataset schemas, run history, SQL query text in OpenLineage facets — readable and writable.",
+					Severity: "medium",
+				})
+				// Sample first namespace for job enumeration
+				if len(namespaces) > 0 {
+					if ns, ok := namespaces[0].(map[string]interface{}); ok {
+						nsName := jStr(ns, "name")
+						r.RawData["first_namespace"] = nsName
+						if st2, _, body2, err2 := httpGET(c, b+"/api/v1/jobs?namespace="+nsName+"&limit=5"); err2 == nil && st2 == 200 {
+							r.RawData["first_ns_jobs_body_len"] = len(body2)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if r.AuthStatus == "" {
+		r.AuthStatus = "on"
+	}
+	return r
 }
