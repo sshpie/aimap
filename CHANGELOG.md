@@ -2,6 +2,35 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.37] - 2026-05-28
+
+### Added: `enumLiteLLM` deep enumerator
+
+Seven-probe deep enumerator for confirmed LiteLLM instances, firing after the
+existing identity fingerprint in `fingerprints.go`.
+
+| Probe | Finding class | Severity |
+|---|---|---|
+| `GET /health` | Version extraction + unhealthy upstream names | info |
+| `GET /model/info` | `api_base` URL leak (internal upstream endpoints) | **high** |
+| `GET /v1/models` | `UNAUTH_ENUM` — model routing table without master_key | **high** |
+| `GET /metrics` | `PII_METRICS_LEAK` — user/team/key labels in Prometheus output | medium |
+| `GET /health/readiness` | `POSTGRES_BACKEND` — CVE-2026-42208 SQLi eligibility | info |
+| `GET /spend/logs` | `SPEND_LEAK` — per-request cost + key-attribution data | medium |
+| `GET /key/list` | `KEY_LIST_EXPOSED` — full virtual-key credential dump | **critical** |
+
+The `api_base` leak is the high-value surface: Azure private deployment URLs,
+self-hosted model server addresses, and internal routing infrastructure disclosed
+without authentication when `LITELLM_MASK_API_BASE=true` is not set.
+
+`KEY_LIST_EXPOSED` at critical: a 200 on `/key/list` means the full virtual key
+inventory is enumerable, including upstream provider bindings for each key.
+
+`enumLiteLLM` registered in the `enumeratorRegistry` map under `"LiteLLM"` — runs
+automatically on any host the fingerprinter confirms as a LiteLLM instance.
+
+---
+
 ## [v1.9.36] - 2026-05-27
 
 ### Added: Argo Workflows (auth-enforced) identity fingerprint

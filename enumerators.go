@@ -101,6 +101,9 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	// ML platforms / experiment tracking
 	"MLflow": enumMLflow,
 
+	// LLM proxy / gateway
+	"LiteLLM": enumLiteLLM,
+
 	// Orchestration / UI
 	"Flowise":     enumFlowise,
 	"Dify":        enumDify,
@@ -5476,5 +5479,239 @@ func enumMarquez(c *http.Client, svc ServiceMatch) EnumResult {
 	if r.AuthStatus == "" {
 		r.AuthStatus = "on"
 	}
+	return r
+}
+
+// ── LiteLLM ─────────────────────────────────────────────────────────
+//
+// LiteLLM is an OpenAI-compatible proxy gateway that routes requests to
+// multiple upstream LLM providers (OpenAI, Azure, Anthropic, Gemini, etc.).
+// Unauthenticated instances expose every upstream API key configured by the
+// operator, the full model routing table, spend logs, and in some
+// configurations the per-key credential list — a full LLMjacking surface.
+//
+// The master_key field controls auth. When absent or blank, the /v1/models
+// endpoint is open to the internet and all probes below succeed without
+// credentials. Even auth-on installs leak version and upstream topology
+// via /health and /health/readiness.
+
+func enumLiteLLM(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// 1. /health — version, health counters, unhealthy upstream names
+	if st, _, body, err := httpGET(c, b+"/health"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if v := jStr(m, "litellm_version"); v != "" {
+				r.Version = v
+				r.Details = append(r.Details, "LiteLLM version: "+v)
+			}
+			healthyCount := int(jFloat(m, "healthy_count"))
+			unhealthyCount := int(jFloat(m, "unhealthy_count"))
+			r.Details = append(r.Details, fmt.Sprintf("Upstream endpoints: %d healthy, %d unhealthy", healthyCount, unhealthyCount))
+			r.RawData["health"] = m
+
+			// Unhealthy endpoint names reveal internal upstream routing config
+			if unhealthyCount > 0 {
+				if unhealthyArr := jArray(m, "unhealthy_endpoints"); unhealthyArr != nil {
+					var names []string
+					for _, ep := range unhealthyArr {
+						if epMap, ok := ep.(map[string]interface{}); ok {
+							if model := jStr(epMap, "model"); model != "" {
+								names = append(names, model)
+							}
+						}
+					}
+					if len(names) > 0 {
+						r.Details = append(r.Details, fmt.Sprintf("Unhealthy upstream models: %s", strings.Join(names, ", ")))
+						r.Findings = append(r.Findings, Finding{
+							Category: "config",
+							Title:    fmt.Sprintf("Unhealthy upstream endpoint names disclosed (%d models)", len(names)),
+							Detail:   fmt.Sprintf("models: %s", strings.Join(names, ", ")),
+							Severity: "info",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 2. /model/info — upstream api_base URLs, model routing table
+	// api_base values are internal upstream LLM endpoint URLs (Azure deployments,
+	// private OpenAI-compat servers, etc.). Their presence confirms the operator
+	// has not set LITELLM_MASK_API_BASE=true and reveals internal infrastructure.
+	if st, _, body, err := httpGET(c, b+"/model/info"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			dataArr := jArray(m, "data")
+			if dataArr != nil {
+				var modelNames []string
+				var apiBases []string
+				var providers []string
+
+				for _, entry := range dataArr {
+					entryMap, ok := entry.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					if mn := jStr(entryMap, "model_name"); mn != "" {
+						modelNames = append(modelNames, mn)
+					}
+					if params := jMap(entryMap, "litellm_params"); params != nil {
+						if ab := jStr(params, "api_base"); ab != "" {
+							apiBases = append(apiBases, ab)
+						}
+						if mdl := jStr(params, "model"); mdl != "" {
+							// model field format is "provider/name" e.g. "openai/gpt-4o"
+							if idx := strings.Index(mdl, "/"); idx > 0 {
+								providers = append(providers, mdl[:idx])
+							}
+						}
+					}
+				}
+
+				if len(modelNames) > 0 {
+					r.Details = append(r.Details, fmt.Sprintf("Models configured: %d (%s)", len(modelNames), strings.Join(modelNames, ", ")))
+					r.RawData["model_names"] = modelNames
+				}
+
+				if len(providers) > 0 {
+					// Deduplicate providers
+					seen := map[string]bool{}
+					var uniq []string
+					for _, p := range providers {
+						if !seen[p] {
+							seen[p] = true
+							uniq = append(uniq, p)
+						}
+					}
+					r.Details = append(r.Details, fmt.Sprintf("Upstream providers: %s", strings.Join(uniq, ", ")))
+					r.RawData["upstream_providers"] = uniq
+				}
+
+				if len(apiBases) > 0 {
+					r.Findings = append(r.Findings, Finding{
+						Category: "API_BASE_LEAK",
+						Title:    fmt.Sprintf("Internal upstream API base URLs exposed (%d endpoints)", len(apiBases)),
+						Detail:   fmt.Sprintf("api_base values: %s — these are the operator's upstream LLM endpoint URLs. May include Azure private deployments, self-hosted model servers, or internal routing infrastructure.", strings.Join(apiBases, "; ")),
+						Severity: "high",
+					})
+					r.RawData["api_bases"] = apiBases
+				}
+			}
+		}
+	}
+
+	// 3. /v1/models — model list; if accessible without auth → UNAUTH_ENUM
+	if st, _, body, err := httpGET(c, b+"/v1/models"); err == nil {
+		if st == 200 {
+			r.AuthStatus = "none"
+			if m, err := parseJSON(body); err == nil {
+				modelArr := jArray(m, "data")
+				var ids []string
+				for _, entry := range modelArr {
+					if em, ok := entry.(map[string]interface{}); ok {
+						if id := jStr(em, "id"); id != "" {
+							ids = append(ids, id)
+						}
+					}
+				}
+				r.Details = append(r.Details, fmt.Sprintf("Models enumerable: %d", len(ids)))
+				r.RawData["v1_models"] = ids
+				r.Findings = append(r.Findings, Finding{
+					Category: "UNAUTH_ENUM",
+					Title:    fmt.Sprintf("LiteLLM model list accessible without master_key (%d models)", len(ids)),
+					Detail:   "GET /v1/models returned the full model routing table without authentication. Any caller can enumerate configured upstream providers and send requests that consume the operator's API quota.",
+					Severity: "high",
+				})
+			}
+		} else if st == 401 || st == 403 {
+			r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+		}
+	}
+
+	// 4. /metrics — Prometheus endpoint; check for user/team/key labels (PII)
+	if st, _, body, err := httpGET(c, b+"/metrics"); err == nil && st == 200 {
+		bodyStr := string(body)
+		var piiLabels []string
+		for _, label := range []string{"litellm_team_alias", "litellm_api_key_hash", "litellm_user"} {
+			if strings.Contains(bodyStr, label) {
+				piiLabels = append(piiLabels, label)
+			}
+		}
+		if len(piiLabels) > 0 {
+			r.Findings = append(r.Findings, Finding{
+				Category: "PII_METRICS_LEAK",
+				Title:    fmt.Sprintf("Prometheus metrics expose user/team labels (%s)", strings.Join(piiLabels, ", ")),
+				Detail:   "/metrics endpoint accessible and contains per-user or per-team telemetry labels. Labels may include hashed API keys, team names, and usernames associated with request traffic.",
+				Severity: "medium",
+			})
+			r.RawData["pii_metrics_labels"] = piiLabels
+		} else {
+			r.Details = append(r.Details, "/metrics accessible (no user/team labels detected)")
+		}
+	}
+
+	// 5. /health/readiness — DB connectivity; PostgreSQL backend = CVE-2026-42208 eligible
+	if st, _, body, err := httpGET(c, b+"/health/readiness"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			dbStatus := jStr(m, "db")
+			r.RawData["readiness"] = m
+			if strings.EqualFold(dbStatus, "connected") {
+				r.Findings = append(r.Findings, Finding{
+					Category: "POSTGRES_BACKEND",
+					Title:    "PostgreSQL backend confirmed via /health/readiness",
+					Detail:   "db=connected in /health/readiness response. LiteLLM with a connected PostgreSQL backend is in the CVE-2026-42208 SQLi vulnerability class. Verify version against the patched release before treating as confirmed.",
+					Severity: "info",
+				})
+				r.Details = append(r.Details, "PostgreSQL backend: connected")
+			}
+		}
+	}
+
+	// 6. /spend/logs — spend log access without auth
+	if st, _, body, err := httpGET(c, b+"/spend/logs"); err == nil && st == 200 {
+		if arr, err := parseJSONArray(body); err == nil && len(arr) > 0 {
+			r.Findings = append(r.Findings, Finding{
+				Category: "SPEND_LEAK",
+				Title:    fmt.Sprintf("Spend log accessible without authentication (%d entries)", len(arr)),
+				Detail:   "/spend/logs returned data without auth. Contains per-request cost attribution, model routing decisions, and API key identifiers for all traffic through the proxy.",
+				Severity: "medium",
+			})
+			r.RawData["spend_log_count"] = len(arr)
+		} else if m, err := parseJSON(body); err == nil {
+			// Some versions return {"data":[...]} shape
+			if dataArr := jArray(m, "data"); len(dataArr) > 0 {
+				r.Findings = append(r.Findings, Finding{
+					Category: "SPEND_LEAK",
+					Title:    fmt.Sprintf("Spend log accessible without authentication (%d entries)", len(dataArr)),
+					Detail:   "/spend/logs returned data without auth. Contains per-request cost attribution, model routing decisions, and API key identifiers for all traffic through the proxy.",
+					Severity: "medium",
+				})
+				r.RawData["spend_log_count"] = len(dataArr)
+			}
+		}
+	}
+
+	// 7. /key/list — API key enumeration; 200 = full credential leak
+	if st, _, body, err := httpGET(c, b+"/key/list"); err == nil {
+		if st == 200 {
+			r.Findings = append(r.Findings, Finding{
+				Category: "KEY_LIST_EXPOSED",
+				Title:    "LiteLLM API key list accessible without authentication",
+				Detail:   "GET /key/list returned HTTP 200. The key management endpoint is unauthenticated. All virtual keys issued through the proxy — including their upstream provider bindings — are enumerable without credentials.",
+				Severity: "critical",
+			})
+			r.RawData["key_list_body_len"] = len(body)
+			if r.AuthStatus != "none" {
+				r.AuthStatus = "none"
+			}
+		}
+	}
+
+	if r.AuthStatus == "unknown" {
+		r.AuthStatus = "on"
+	}
+
 	return r
 }
