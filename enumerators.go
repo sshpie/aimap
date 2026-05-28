@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"regexp"
@@ -117,7 +118,10 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"Clawdbot":               enumClawdbot,
 
 	// Compute orchestration / workflow
-	"n8n": enumN8n,
+	"n8n":             enumN8n,
+	"Temporal Web":    enumTemporal,
+	"Cadence Web":     enumCadence,
+	"Argo Workflows":  enumArgoWorkflows,
 
 	// BI / Dashboard
 	"Metabase":        enumMetabase,
@@ -2118,6 +2122,255 @@ func enumN8n(c *http.Client, svc ServiceMatch) EnumResult {
 	}
 
 	return r
+}
+
+// ── Temporal Web ─────────────────────────────────────────────────────
+
+// sensitiveTaskQueuePatterns covers task queue name substrings that indicate
+// high-sensitivity workflow workloads (payments, PII, medical, identity).
+var sensitiveTaskQueuePatterns = []string{
+	"payment", "finance", "trade", "kyc", "medical", "health",
+	"pii", "user", "customer",
+}
+
+func hasSensitiveQueue(queue string) bool {
+	lower := strings.ToLower(queue)
+	for _, p := range sensitiveTaskQueuePatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func enumTemporal(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// Step 1: cluster-info — identity + version
+	if st, _, body, err := httpGET(c, b+"/api/v1/cluster-info"); err == nil && st == 200 {
+		r.AuthStatus = "none"
+		if m, err := parseJSON(body); err == nil {
+			if name := jStr(m, "clusterName"); name != "" {
+				r.Details = append(r.Details, "Cluster: "+name)
+				r.RawData["clusterName"] = name
+			}
+			if ver := jStr(m, "serverVersion"); ver != "" {
+				r.Version = ver
+				r.Details = append(r.Details, "Server version: "+ver)
+			}
+			if clients := jMap(m, "supportedClients"); clients != nil {
+				var clist []string
+				for k := range clients {
+					clist = append(clist, k)
+				}
+				r.Details = append(r.Details, "Supported clients: "+strings.Join(clist, ", "))
+			}
+		}
+		r.Findings = append(r.Findings, Finding{
+			Category: "access",
+			Title:    "Temporal cluster-info readable without authentication",
+			Detail:   "/api/v1/cluster-info exposes cluster name, server version, and supported SDK client list without auth.",
+			Severity: "medium",
+		})
+	} else if st == 401 || st == 403 {
+		r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+	}
+
+	// Step 2: namespaces — list + count
+	var namespaceNames []string
+	if st, _, body, err := httpGET(c, b+"/api/v1/namespaces"); err == nil && st == 200 {
+		r.AuthStatus = "none"
+		if m, err := parseJSON(body); err == nil {
+			nsList := jArray(m, "namespaces")
+			r.Details = append(r.Details, fmt.Sprintf("Namespaces: %d", len(nsList)))
+			r.RawData["namespace_count"] = len(nsList)
+			for _, ns := range nsList {
+				if nsMap, ok := ns.(map[string]interface{}); ok {
+					// Namespace records nest name under namespaceInfo.name
+					if info := jMap(nsMap, "namespaceInfo"); info != nil {
+						if name := jStr(info, "name"); name != "" {
+							namespaceNames = append(namespaceNames, name)
+						}
+					}
+					// Some versions expose name at top level
+					if name := jStr(nsMap, "name"); name != "" && !contains(namespaceNames, name) {
+						namespaceNames = append(namespaceNames, name)
+					}
+				}
+			}
+			if len(namespaceNames) > 0 {
+				r.Details = append(r.Details, "Namespace names: "+strings.Join(namespaceNames, ", "))
+				r.RawData["namespace_names"] = namespaceNames
+			}
+		}
+		r.Findings = append(r.Findings, Finding{
+			Category: "access",
+			Title:    fmt.Sprintf("Temporal namespace list exposed — %d namespace(s)", len(namespaceNames)),
+			Detail:   "Namespace enumeration reveals the operator's workflow domains. Each namespace isolates workflow executions; their names often reflect business functions (payments, user-onboarding, etc.).",
+			Severity: "high",
+		})
+	}
+
+	// Step 3: per-namespace workflow sampling (up to 3 namespaces)
+	var allWorkflowTypes []string
+	var allTaskQueues []string
+	runningWithSensitiveQueue := false
+
+	cap := 3
+	if len(namespaceNames) < cap {
+		cap = len(namespaceNames)
+	}
+	for _, ns := range namespaceNames[:cap] {
+		wfURL := fmt.Sprintf("%s/api/v1/namespaces/%s/workflows?pageSize=5", b, ns)
+		if st, _, body, err := httpGET(c, wfURL); err == nil && st == 200 {
+			if m, err := parseJSON(body); err == nil {
+				executions := jArray(m, "executions")
+				for _, ex := range executions {
+					exMap, ok := ex.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					// execution.execution.workflowId
+					if exec := jMap(exMap, "execution"); exec != nil {
+						if wfID := jStr(exec, "workflowId"); wfID != "" {
+							r.Details = append(r.Details, fmt.Sprintf("[%s] workflow: %s", ns, wfID))
+						}
+					}
+					// execution.type.name
+					if wfType := jMap(exMap, "type"); wfType != nil {
+						if typeName := jStr(wfType, "name"); typeName != "" && !contains(allWorkflowTypes, typeName) {
+							allWorkflowTypes = append(allWorkflowTypes, typeName)
+						}
+					}
+					// execution.taskQueue (present on some API versions)
+					if tq := jStr(exMap, "taskQueue"); tq != "" && !contains(allTaskQueues, tq) {
+						allTaskQueues = append(allTaskQueues, tq)
+					}
+					// status
+					status := jStr(exMap, "status")
+					if status == "Running" || status == "WORKFLOW_EXECUTION_STATUS_RUNNING" {
+						// Check task queue for sensitive patterns
+						if tq := jStr(exMap, "taskQueue"); tq != "" && hasSensitiveQueue(tq) {
+							runningWithSensitiveQueue = true
+						}
+					}
+				}
+				if len(executions) > 0 {
+					r.Findings = append(r.Findings, Finding{
+						Category: "data",
+						Title:    fmt.Sprintf("Temporal workflows readable in namespace %q — %d execution(s) sampled", ns, len(executions)),
+						Detail:   "Workflow execution history is world-readable. Records include workflow IDs, types, run status, and task queue names — reveals business process topology and active workload identity.",
+						Severity: "high",
+					})
+				}
+			}
+		}
+	}
+
+	if len(allWorkflowTypes) > 0 {
+		r.Details = append(r.Details, "Workflow types seen: "+strings.Join(allWorkflowTypes, ", "))
+		r.RawData["workflow_types"] = allWorkflowTypes
+	}
+	if len(allTaskQueues) > 0 {
+		r.Details = append(r.Details, "Task queues seen: "+strings.Join(allTaskQueues, ", "))
+		r.RawData["task_queues"] = allTaskQueues
+	}
+
+	// Auto-CRITICAL: running workflows on sensitive-named task queues
+	if runningWithSensitiveQueue {
+		r.Findings = append(r.Findings, Finding{
+			Category: "data",
+			Title:    "CRITICAL: running workflows on sensitive task queue (payment/finance/kyc/medical/pii/user/customer)",
+			Detail:   "At least one RUNNING workflow is assigned to a task queue whose name matches a high-sensitivity pattern. These task queues handle business-critical or regulated workloads. Unauthenticated read access to running workflow state likely exposes PII, financial data, or regulated health information.",
+			Severity: "critical",
+		})
+	}
+
+	if r.AuthStatus == "unknown" {
+		r.AuthStatus = "auth required"
+	}
+
+	return r
+}
+
+// ── Cadence Web ──────────────────────────────────────────────────────
+
+func enumCadence(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// Health
+	if st, _, body, err := httpGET(c, b+"/api/v1/health"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			r.RawData["health"] = m
+		}
+	}
+
+	// Domains list
+	if st, _, body, err := httpGET(c, b+"/api/v1/domains"); err == nil && st == 200 {
+		r.AuthStatus = "none"
+		if m, err := parseJSON(body); err == nil {
+			domains := jArray(m, "domains")
+			var domainNames []string
+			for _, d := range domains {
+				if dm, ok := d.(map[string]interface{}); ok {
+					if info := jMap(dm, "domainInfo"); info != nil {
+						if name := jStr(info, "name"); name != "" {
+							domainNames = append(domainNames, name)
+						}
+					}
+				}
+			}
+			r.Details = append(r.Details, fmt.Sprintf("Domains: %d", len(domains)))
+			if len(domainNames) > 0 {
+				r.Details = append(r.Details, "Domain names: "+strings.Join(domainNames, ", "))
+				r.RawData["domain_names"] = domainNames
+			}
+		}
+		r.Findings = append(r.Findings, Finding{
+			Category: "access",
+			Title:    "Cadence domain list readable without authentication",
+			Detail:   "/api/v1/domains exposes workflow domain names. Cadence is Uber's durable execution platform; exposed domains reveal workflow topology and operator business functions.",
+			Severity: "high",
+		})
+	} else if st == 401 || st == 403 {
+		r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+	}
+
+	// Cluster info
+	if st, _, body, err := httpGET(c, b+"/api/v1/clusters"); err == nil && st == 200 {
+		r.AuthStatus = "none"
+		if m, err := parseJSON(body); err == nil {
+			clusters := jArray(m, "clusters")
+			r.Details = append(r.Details, fmt.Sprintf("Clusters: %d", len(clusters)))
+			r.RawData["cluster_count"] = len(clusters)
+		}
+		r.Findings = append(r.Findings, Finding{
+			Category: "access",
+			Title:    "Cadence cluster topology readable without authentication",
+			Detail:   "/api/v1/clusters exposes cluster membership and replication topology.",
+			Severity: "medium",
+		})
+	}
+
+	if r.AuthStatus == "unknown" {
+		r.AuthStatus = "auth required"
+	}
+
+	return r
+}
+
+// contains is a small helper to check membership in a string slice.
+func contains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func enumTTS(c *http.Client, svc ServiceMatch) EnumResult {
@@ -4784,4 +5037,245 @@ func enumRedisInsight(c *http.Client, svc ServiceMatch) EnumResult {
 	}
 
 	return r
+}
+
+// ── Argo Workflows ────────────────────────────────────────────────────────────
+
+func enumArgoWorkflows(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// /api/v1/version — identity + version extraction. No auth check in source
+	// (GetVersion has no GetClaims call). Fires on all instances.
+	if st, _, body, err := httpGET(c, b+"/api/v1/version"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if v := jStr(m, "version"); v != "" {
+				r.Version = v
+				r.Details = append(r.Details, fmt.Sprintf("Version: %s", v))
+				// Map version to CVE exposure window.
+				r.Details = append(r.Details, argoWorkflowsCVEWindow(v))
+			}
+			if platform := jStr(m, "platform"); platform != "" {
+				r.Details = append(r.Details, fmt.Sprintf("Platform: %s", platform))
+			}
+		}
+	}
+
+	// /api/v1/userinfo — auth mode classifier. serviceAccountName only present
+	// when --auth-mode=server is active: all callers execute as argo-server SA,
+	// no bearer token required. Empty {} = auth enforced.
+	if st, _, body, err := httpGET(c, b+"/api/v1/userinfo"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			saName := jStr(m, "serviceAccountName")
+			saNS := jStr(m, "serviceAccountNamespace")
+			if saName != "" {
+				r.AuthStatus = "none"
+				r.Details = append(r.Details, fmt.Sprintf("Server mode: runs as SA %s/%s (no bearer token required)", saNS, saName))
+				r.Findings = append(r.Findings, Finding{
+					Category: "access",
+					Title:    "Argo Workflows: unauthenticated access (--auth-mode=server)",
+					Detail:   fmt.Sprintf("All API endpoints accessible without credentials. Caller inherits argo-server ClusterRole: create/exec/delete workflows and pods cluster-wide. SA: %s/%s. Attack path: POST /api/v1/workflows/{namespace} → arbitrary container execution.", saNS, saName),
+					Severity: "critical",
+				})
+			} else {
+				r.AuthStatus = "auth required"
+			}
+		}
+	} else if st == 401 || st == 403 {
+		r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+	}
+
+	// Namespace sweep — enumerate workflows across ML-common namespaces.
+	// kubeflow/ml-pipeline carry KFP v1 pipelines with the highest credential density.
+	mlNamespaces := []string{"argo", "kubeflow", "ml-pipeline", "training", "data-science", "mlflow", "default"}
+	totalWorkflows := 0
+	namespacesWithWorkflows := []string{}
+
+	for _, ns := range mlNamespaces {
+		url := fmt.Sprintf("%s/api/v1/workflows/%s", b, ns)
+		if st, _, body, err := httpGET(c, url); err == nil && st == 200 {
+			if m, err := parseJSON(body); err == nil {
+				if items, ok := m["items"].([]interface{}); ok && len(items) > 0 {
+					totalWorkflows += len(items)
+					namespacesWithWorkflows = append(namespacesWithWorkflows, fmt.Sprintf("%s(%d)", ns, len(items)))
+					// Scan first workflow spec for credential patterns in parameters.
+					if len(items) > 0 {
+						argoWorkflowsScanParams(items[0], &r, ns)
+					}
+				}
+			}
+		}
+	}
+
+	if totalWorkflows > 0 {
+		r.RawData["workflow_count"] = totalWorkflows
+		r.RawData["namespaces_with_workflows"] = namespacesWithWorkflows
+		r.Details = append(r.Details, fmt.Sprintf("Workflows exposed: %d across %v", totalWorkflows, namespacesWithWorkflows))
+		r.Findings = append(r.Findings, Finding{
+			Category: "data",
+			Title:    "Argo Workflows: workflow history and pipeline specs exposed",
+			Detail:   fmt.Sprintf("%d workflows readable across namespaces %v. spec.arguments.parameters and status.nodes contain resolved parameter values — credentials passed as workflow parameters appear in plaintext.", totalWorkflows, namespacesWithWorkflows),
+			Severity: "high",
+		})
+	}
+
+	// CVE-2026-28229 probe: Authorization: Bearer nothing retrieves all
+	// WorkflowTemplates including embedded K8s secrets on versions < 3.7.11 / < 4.0.2.
+	// Probe the default 'argo' namespace; any namespace with templates works.
+	for _, ns := range []string{"argo", "kubeflow", "default"} {
+		url := fmt.Sprintf("%s/api/v1/workflow-templates/%s", b, ns)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer nothing")
+		resp, err := c.Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 200 {
+			if m, err := parseJSON(body); err == nil {
+				if items, ok := m["items"].([]interface{}); ok && items != nil {
+					r.RawData["cve_2026_28229_templates"] = len(items)
+					r.Details = append(r.Details, fmt.Sprintf("CVE-2026-28229: %d WorkflowTemplates retrieved with 'Bearer nothing' in namespace %s", len(items), ns))
+					r.Findings = append(r.Findings, Finding{
+						Category: "access",
+						Title:    "CVE-2026-28229: WorkflowTemplate exfil with fake bearer token",
+						Detail:   fmt.Sprintf("GET /api/v1/workflow-templates/%s returned %d templates with 'Authorization: Bearer nothing'. Templates embed K8s secret references, artifact repo credentials (S3/GCS keys), and SA tokens. Affects versions < 3.7.11 / < 4.0.2.", ns, len(items)),
+						Severity: "critical",
+					})
+					break
+				}
+			}
+		}
+	}
+
+	// /api/v1/info — managedNamespace reveals scope; links may disclose internal tooling URLs.
+	if st, _, body, err := httpGET(c, b+"/api/v1/info"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if ns := jStr(m, "managedNamespace"); ns != "" {
+				r.Details = append(r.Details, fmt.Sprintf("Managed namespace: %s", ns))
+				r.RawData["managed_namespace"] = ns
+			}
+		}
+	}
+
+	// /metrics — version disclosure via argo_workflows_info label even when
+	// ARGO_SERVER_METRICS_AUTH is not set. Also reveals workflow queue depth and
+	// phase breakdown per namespace.
+	if st, _, body, err := httpGET(c, b+"/metrics"); err == nil && st == 200 {
+		bodyStr := string(body)
+		if strings.Contains(bodyStr, "argo_workflows") {
+			r.Details = append(r.Details, "Prometheus metrics exposed (/metrics): workflow counts and version labels readable")
+			r.Findings = append(r.Findings, Finding{
+				Category: "info",
+				Title:    "Argo Workflows /metrics exposed",
+				Detail:   "Prometheus metrics endpoint returns argo_workflows_info (version label) and per-namespace workflow phase counts without authentication. Reveals operational load and exact version string.",
+				Severity: "low",
+			})
+		}
+	}
+
+	if r.AuthStatus == "unknown" {
+		r.AuthStatus = "auth required"
+	}
+	return r
+}
+
+// argoWorkflowsCVEWindow returns a CVE exposure summary for a given version string.
+func argoWorkflowsCVEWindow(version string) string {
+	// Strip leading 'v'.
+	v := strings.TrimPrefix(version, "v")
+	notes := []string{}
+
+	// CVE-2026-28229: Bearer-nothing WorkflowTemplate exfil. Fixed 3.7.11 / 4.0.2.
+	if argoVersionBefore(v, "3.7.11") || (strings.HasPrefix(v, "4.0.") && argoVersionBefore(v, "4.0.2")) {
+		notes = append(notes, "CVE-2026-28229(CRIT:WorkflowTemplate exfil via Bearer nothing)")
+	}
+	// CVE-2025-66626: ZipSlip symlink RCE. Fixed 3.6.14 / 3.7.5.
+	if argoVersionBefore(v, "3.6.14") || (strings.HasPrefix(v, "3.7.") && argoVersionBefore(v, "3.7.5")) {
+		notes = append(notes, "CVE-2025-66626(HIGH:ZipSlip RCE)")
+	}
+	// CVE-2024-53862: Archived workflow fake-token bypass. Fixed 3.6.2 / 3.5.13.
+	if argoVersionBefore(v, "3.6.2") {
+		notes = append(notes, "CVE-2024-53862(HIGH:archived workflow auth bypass)")
+	}
+
+	if len(notes) == 0 {
+		return "CVE window: no known critical/high CVEs for this version"
+	}
+	return "CVE window: " + strings.Join(notes, "; ")
+}
+
+// argoVersionBefore returns true if version a is strictly before version b.
+// Compares major.minor.patch numerically; non-numeric parts are treated as 0.
+func argoVersionBefore(a, b string) bool {
+	pa := argoParseVer(a)
+	pb := argoParseVer(b)
+	for i := 0; i < 3; i++ {
+		if pa[i] < pb[i] {
+			return true
+		}
+		if pa[i] > pb[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func argoParseVer(v string) [3]int {
+	// Strip pre-release suffix (e.g. "3.7.11-rc1" → "3.7.11").
+	v = strings.SplitN(v, "-", 2)[0]
+	parts := strings.Split(v, ".")
+	var out [3]int
+	for i := 0; i < 3 && i < len(parts); i++ {
+		fmt.Sscanf(parts[i], "%d", &out[i])
+	}
+	return out
+}
+
+// argoWorkflowsScanParams checks a workflow item for credential patterns in
+// spec.arguments.parameters and flags any that look like secrets.
+func argoWorkflowsScanParams(item interface{}, r *EnumResult, ns string) {
+	m, ok := item.(map[string]interface{})
+	if !ok {
+		return
+	}
+	spec, ok := m["spec"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	args, ok := spec["arguments"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	params, ok := args["parameters"].([]interface{})
+	if !ok {
+		return
+	}
+
+	credPatterns := []string{"key", "secret", "token", "password", "credential", "cred", "apikey", "api_key", "access", "auth"}
+	for _, p := range params {
+		pm, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := strings.ToLower(jStr(pm, "name"))
+		value := jStr(pm, "value")
+		for _, pat := range credPatterns {
+			if strings.Contains(name, pat) && value != "" {
+				r.Findings = append(r.Findings, Finding{
+					Category: "credential",
+					Title:    fmt.Sprintf("Argo Workflows: credential-pattern parameter in namespace %s", ns),
+					Detail:   fmt.Sprintf("Workflow parameter '%s' matches credential naming pattern and has a non-empty resolved value. Credentials passed as workflow parameters are world-readable on unauth instances.", jStr(pm, "name")),
+					Severity: "critical",
+				})
+				r.RawData["credential_param_"+ns] = jStr(pm, "name")
+				return // one finding per workflow is sufficient
+			}
+		}
+	}
 }

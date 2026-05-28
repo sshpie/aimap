@@ -1283,8 +1283,11 @@ var Fingerprints = []Fingerprint{
 		Severity: "high",
 	},
 	{
-		Name:         "Temporal Web",
-		DefaultPorts: []int{8080, 8233},
+		Name: "Temporal Web",
+		// DefaultPorts: 8080/8233 = Temporal Web UI; 7243 = HTTP REST API gateway
+		// (temporal server --headless mode or standalone temporal-http-api sidecar);
+		// 7233 = gRPC frontend (not HTTP, listed so port-scanner includes it in sweep).
+		DefaultPorts: []int{8080, 8233, 7233, 7243},
 		Probes: []Probe{
 			{Path: "/api/v1/cluster-info", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
@@ -1294,6 +1297,268 @@ var Fingerprints = []Fingerprint{
 			{Path: "/api/v1/namespaces", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "namespaces"},
+			}},
+			// HTTP REST API gateway (port 7243): unauth on default Temporal installs.
+			// /api/v1/system-info returns serverVersion + capabilities; both fields
+			// are Temporal-specific and conjunctive-match cleanly against other 7243
+			// services.
+			{Path: "/api/v1/system-info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "serverVersion"},
+				{Type: "json_field", Field: "capabilities"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name:         "Cadence Web",
+		DefaultPorts: []int{8088},
+		Probes: []Probe{
+			{Path: "/api/v1/domains", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "domains"},
+			}},
+			{Path: "/api/v1/clusters", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "clusters"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// ── Workflow Orchestration (extended) ──────────────────────
+	{
+		Name: "Argo Workflows",
+		// Port 2746 = default argo-server HTTP/HTTPS port (Argo-exclusive).
+		// Three probe tiers:
+		//   1. /api/v1/version — identity probe; gitTag+gitTreeState+compiler is
+		//      Argo-unique and fires on ALL instances (auth or not) because GetVersion
+		//      has no auth check in the source. Catches auth-enforced instances too.
+		//   2. /api/v1/userinfo — auth classifier; serviceAccountName field only
+		//      appears when --auth-mode=server is active (all requests run as the
+		//      argo-server SA, no bearer token required). Tight unauth discriminator.
+		//   3. /api/v1/info — fallback; managedNamespace + links fields are always
+		//      present in the startup struct; no auth check in GetInfo handler.
+		// Any probe matching fires the fingerprint. Severity=critical: unauth instances
+		// expose POST /api/v1/workflows (arbitrary container exec) and pod exec.
+		DefaultPorts: []int{2746},
+		Probes: []Probe{
+			{Path: "/api/v1/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "gitTag"},
+				{Type: "body_contains", Value: "gitTreeState"},
+				{Type: "body_contains", Value: "compiler"},
+			}},
+			{Path: "/api/v1/userinfo", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "serviceAccountName"},
+			}},
+			{Path: "/api/v1/info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "managedNamespace"},
+				{Type: "body_contains", Value: "links"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		Name: "Flyte Console",
+		// Ports: 8088 (Flyte sandbox default) and 30080 (NodePort in k8s deploys).
+		// Cadence Web also runs on 8088 — both fingerprints fire; the json_field
+		// anchor discriminates: Flyte returns controlPlaneVersion, Cadence returns
+		// domains/clusters.
+		DefaultPorts: []int{8088, 30080},
+		Probes: []Probe{
+			{Path: "/api/v1/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "controlPlaneVersion"},
+			}},
+			{Path: "/api/v1/projects", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "projects"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "Mage.ai",
+		// Port 6789 = default Mage server port (docker run -p 6789:6789 mageai/mageai).
+		// /api/kernels returns running Jupyter kernels; /api/pipelines returns the full
+		// pipeline inventory. Both are unauth on default installs.
+		// Kernel access = remote code execution via the kernel API — critical severity.
+		DefaultPorts: []int{6789},
+		Probes: []Probe{
+			{Path: "/api/kernels", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "kernels"},
+			}},
+			{Path: "/api/pipelines", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "pipelines"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		Name: "ZenML",
+		// Port 8237 = ZenML server default. Default install ships with an empty
+		// password for the default user — auth is present but trivially bypassed.
+		// /api/v1/info returns version info; the "version" field is the tight anchor
+		// since body_contains "zen" is too broad (Zendesk, Zenoss, etc.).
+		DefaultPorts: []int{8237},
+		Probes: []Probe{
+			{Path: "/api/v1/info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "zenml"},
+			}},
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "status"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "Kestra",
+		// Port 8080 — shared with Airflow, Spark, Conductor, Hatchet, etc.
+		// Anchor on Kestra-specific paginated response shape: top-level "results"
+		// array + "total" field on /api/v1/flows, and the unique "taskRunList"
+		// string that appears in flow execution objects.
+		// Pre-0.24 installs are fully open (no auth required).
+		DefaultPorts: []int{8080},
+		Probes: []Probe{
+			{Path: "/api/v1/flows", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "results"},
+				{Type: "body_contains", Value: "taskRunList"},
+			}},
+			{Path: "/api/v1/flows/distinct-namespaces", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "namespace"},
+				{Type: "body_contains", Value: "Kestra"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "Apache DolphinScheduler",
+		// Port 12345 = DolphinScheduler API server default.
+		// Default credentials admin/dolphinscheduler123 are widely unchanged in
+		// production; CVE-2024-43202 enables unauth RCE via Python task submission.
+		// Anchor: the SPA root path serves an HTML redirect to /ui/#/login containing
+		// the literal string "/dolphinscheduler/ui/#/login".
+		DefaultPorts: []int{12345},
+		Probes: []Probe{
+			{Path: "/dolphinscheduler/ui/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "dolphinscheduler"},
+			}},
+			{Path: "/dolphinscheduler/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "/dolphinscheduler/ui/#/login"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		Name: "Netflix Conductor",
+		// Port 8080 — shared port; anchor tightly on Conductor-specific fields.
+		// /api/metadata/workflow returns workflow definitions; each definition
+		// contains the "ownerApp" field which is unique to Conductor's schema.
+		// body_contains "ownerApp" + json_field "results" is the conjunctive
+		// discriminator that rejects Kestra, Airflow, and other 8080 services.
+		DefaultPorts: []int{8080},
+		Probes: []Probe{
+			{Path: "/api/metadata/workflow", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "results"},
+				{Type: "body_contains", Value: "ownerApp"},
+			}},
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "status"},
+				{Type: "body_contains", Value: "conductor"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "Windmill",
+		// Port 80 = primary (served via Caddy reverse proxy in default docker-compose).
+		// /api/health returns {"db":"ok","worker_count":N} — the db + worker_count
+		// combination is unique to Windmill's health response schema.
+		// CVE-2026-29059 (CVSS 10.0) affects unpatched instances; default admin
+		// credentials are set on first deploy and frequently left unchanged.
+		DefaultPorts: []int{80, 443, 8000},
+		Probes: []Probe{
+			{Path: "/api/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "db"},
+				{Type: "json_field", Field: "worker_count"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "windmill"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		Name: "Restate",
+		// Ports: 9070 = admin/management API (no auth by default); 8080 = ingress
+		// (service invocation endpoint). /services on :9070 returns registered service
+		// list; /deployments returns registered deployment configs.
+		// Auth is completely absent on the admin port in default installs.
+		DefaultPorts: []int{9070, 8080},
+		Probes: []Probe{
+			{Path: "/services", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "services"},
+			}},
+			{Path: "/deployments", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "deployments"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "Hatchet",
+		// Port 8080 = Hatchet API server (shared — anchor on Hatchet-specific fields).
+		// Port 8733 = internal healthcheck port (maps to /healthz).
+		// /api/v1/meta is the Hatchet-specific metadata endpoint; body_contains
+		// "hatchet" discriminates from other 8080 services sharing the port.
+		// Default install also exposes PostgreSQL on 5435 and RabbitMQ on 15673.
+		DefaultPorts: []int{8080, 8733},
+		Probes: []Probe{
+			{Path: "/api/v1/meta", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "hatchet"},
+			}},
+			{Path: "/healthz", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "hatchet"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "Dagster",
+		// Port 3000 = Dagster webserver (OSS default).
+		// /server_info exposes dagster_webserver_version — field name unique to Dagster.
+		// /graphql exposes the full GraphQL API including runConfigYaml (stores DB
+		// credentials and API keys). Auth is off by default; GitHub issue #2219 open
+		// since 2020, explicitly deferred by maintainers.
+		DefaultPorts: []int{3000},
+		Probes: []Probe{
+			{Path: "/server_info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "dagster_webserver_version"},
+			}},
+			{Path: "/graphql", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "DagsterRunStatus"},
 			}},
 		},
 		Severity: "high",
