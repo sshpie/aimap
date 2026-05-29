@@ -2,6 +2,52 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.39] - 2026-05-29
+
+### Added: Kubecost + OpenCost cost-model enumerators (Insight #20)
+
+Closes the Insight #20 enumerator gap. v1.9.38 added the Kubecost/OpenCost
+*fingerprints*; this release adds the matching deep enumerators so a confirmed
+cost-model host gets driven for its actual exposure instead of stopping at
+identification. Enumerator count ~50 -> 52.
+
+- **`enumKubecost`** — drives `/model/clusterInfo` (cluster topology + cloud
+  provider/region/account) and `/model/allocation` (daily CPU/memory/total cost
+  by namespace). `parseClusterInfo` and `parseAllocation` reject a bare HTTP 200
+  and require the vendor JSON shape (`code` field + the provisioner / `cpuCost`
+  keys) so a catchall echo cannot false-positive.
+- **`enumOpenCost`** — drives `/allocation` and `/metrics` on the definitive
+  `:9003` API port (Insight #52).
+- **`costPostureFinding`** tiers the exposure (auth state + whether cost data
+  was actually returned) into the finding severity.
+- Wired into the `enumerators.go` dispatch switch.
+
+### Fixed: Tabnine Context Engine fingerprint (over-specified conjunct)
+
+`TestTabnine_MatchesAuthRequired` had been failing: the `/api/version` probe
+was a conjunctive match that could never fire. v1.9.33 added a
+`json_field:documentation` conjunct to dodge an FP at 48.209.17.55
+(cite.videmak.net), on the claim that "Tabnine's actual auth-required response
+includes a `documentation` field." That claim is unsubstantiated — the original
+v1.9.3 live-observed body, the fingerprint's own code comment, and Tabnine's
+public API docs all lack any `documentation` field. Requiring it meant the
+probe could never match a real Tabnine host (false negative), which is strictly
+worse than the FP it tried to fix.
+
+Removed the phantom conjunct and re-anchored on the full product-unique message
+string (`json_field:error` + `body_contains "API key required. Use
+Authorization: Bearer <key> or X-API-Key header."`) — same Insight #6 discipline
+as the v1.9.31 Evolution API "in the house" tightening. The videmak body was
+byte-identical to real Tabnine, so it cannot be excluded by body content alone;
+that collision is now documented in the fingerprint as a known, accepted
+limitation rather than papered over with a field Tabnine does not emit.
+
+### Fixed: `contains([]int)` test-helper collision
+
+Renamed the local `contains([]int)` helper to `containsPort` in
+`fingerprints_ports_test.go` and `fingerprints_systematic_ports_test.go` so it
+no longer shadows the package-level `contains()` used elsewhere.
+
 ## [v1.9.38] - 2026-05-28
 
 ### Added: Kubecost + OpenCost fingerprints

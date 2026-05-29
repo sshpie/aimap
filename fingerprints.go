@@ -1863,13 +1863,28 @@ var Fingerprints = []Fingerprint{
 		// returns the Tabnine-specific auth-required message
 		// {"error":"Unauthorized","message":"API key required. Use
 		// Authorization: Bearer <key> or X-API-Key header."}.
+		//
+		// Anchored on the full product-unique message string (Insight #6
+		// discipline, same shape as the v1.9.31 Evolution API "in the house"
+		// fix): json_field:error + the complete "API key required. Use
+		// Authorization: Bearer <key> or X-API-Key header." phrase. The
+		// partial "X-API-Key header" substring alone is too generic.
+		//
+		// NOTE: v1.9.33 added a json_field:documentation conjunct to dodge an
+		// FP at 48.209.17.55 (cite.videmak.net). That was wrong: real Tabnine
+		// does not emit a "documentation" field on this endpoint (the observed
+		// body above, the original v1.9.3 survey, and Tabnine's public API
+		// docs all lack it), so the conjunct could never fire on a real host —
+		// a false negative that defeated the fingerprint. Removed in v1.9.39.
+		// The videmak body was byte-identical to real Tabnine, so it cannot be
+		// excluded by body content alone; that collision is a known, accepted
+		// limitation, not grounds for inventing a phantom field.
 		Name:         "Tabnine Context Engine",
 		DefaultPorts: []int{443, 80, 8080},
 		Probes: []Probe{
 			{Path: "/api/version", Matches: []MatchCond{
 				{Type: "json_field", Field: "error"},
-				{Type: "body_contains", Value: "X-API-Key header"},
-				{Type: "json_field", Field: "documentation"},
+				{Type: "body_contains", Value: "API key required. Use Authorization: Bearer <key> or X-API-Key header."},
 			}},
 		},
 		Severity: "high",
