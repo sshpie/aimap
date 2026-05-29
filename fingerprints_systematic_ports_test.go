@@ -42,7 +42,7 @@ func TestSystematicPorts_UserFacingFPsIncludeHTTPAlts(t *testing.T) {
 			continue
 		}
 		for _, p := range c.needPorts {
-			if !contains(fp.DefaultPorts, p) {
+			if !containsPort(fp.DefaultPorts, p) {
 				t.Errorf("%s FP missing port %d in DefaultPorts (got %v)", c.name, p, fp.DefaultPorts)
 			}
 		}

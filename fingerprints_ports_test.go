@@ -14,7 +14,11 @@ func fpByName(name string) *Fingerprint {
 	return nil
 }
 
-func contains(ports []int, p int) bool {
+// containsPort is the int-slice membership helper for DefaultPorts audits.
+// Renamed from contains to avoid colliding with the string-slice contains in
+// enumerators.go (added 2026-05-27 with enumArgoWorkflows), which had left the
+// package test target failing to build.
+func containsPort(ports []int, p int) bool {
 	for _, x := range ports {
 		if x == p {
 			return true
@@ -33,7 +37,7 @@ func TestGrafana_DefaultPortsIncludesStandardHTTPS(t *testing.T) {
 		t.Fatal("Grafana fingerprint not found")
 	}
 	for _, p := range []int{3000, 80, 443} {
-		if !contains(fp.DefaultPorts, p) {
+		if !containsPort(fp.DefaultPorts, p) {
 			t.Errorf("Grafana FP missing port %d in DefaultPorts (got %v)", p, fp.DefaultPorts)
 		}
 	}
@@ -46,11 +50,11 @@ func TestMem0_DefaultPortsIncludesPort8000(t *testing.T) {
 	if fp == nil {
 		t.Fatal("Mem0 fingerprint not found")
 	}
-	if !contains(fp.DefaultPorts, 8000) {
+	if !containsPort(fp.DefaultPorts, 8000) {
 		t.Errorf("Mem0 FP missing port 8000 in DefaultPorts (got %v)", fp.DefaultPorts)
 	}
 	// Keep the original default too
-	if !contains(fp.DefaultPorts, 8888) {
+	if !containsPort(fp.DefaultPorts, 8888) {
 		t.Errorf("Mem0 FP must keep port 8888 in DefaultPorts (got %v)", fp.DefaultPorts)
 	}
 }

@@ -111,8 +111,8 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"SillyTavern": enumSillyTavern,
 
 	// AI agent platforms
-	"Agno":                    enumAgno,
-	"LangGraph Server":        enumLangGraph,
+	"Agno":                   enumAgno,
+	"LangGraph Server":       enumLangGraph,
 	"OpenHands":              enumOpenHands,
 	"AutoGen Studio":         enumAutoGenStudio,
 	"Anti-detect CDP server": enumAntiDetectCDP,
@@ -121,10 +121,10 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"Clawdbot":               enumClawdbot,
 
 	// Compute orchestration / workflow
-	"n8n":             enumN8n,
-	"Temporal Web":    enumTemporal,
-	"Cadence Web":     enumCadence,
-	"Argo Workflows":  enumArgoWorkflows,
+	"n8n":            enumN8n,
+	"Temporal Web":   enumTemporal,
+	"Cadence Web":    enumCadence,
+	"Argo Workflows": enumArgoWorkflows,
 
 	// BI / Dashboard
 	"Metabase":        enumMetabase,
@@ -140,6 +140,10 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"OpenLIT":              enumOpenLIT,
 	"Pezzo":                enumPezzo,
 	"Prometheus":           enumPrometheus,
+
+	// K8s FinOps / cost allocation
+	"Kubecost": enumKubecost,
+	"OpenCost": enumOpenCost,
 
 	// Container / Kubernetes / infra
 	"etcd": enumEtcd,
@@ -457,7 +461,7 @@ func enumLlamaCpp(c *http.Client, svc ServiceMatch) EnumResult {
 				r.RawData["chat_template_excerpt"] = excerpt
 				r.Findings = append(r.Findings, Finding{
 					Category: "config", Title: "chat_template exposed via /props",
-					Detail: "Custom system-prompt / persona configuration disclosed",
+					Detail:   "Custom system-prompt / persona configuration disclosed",
 					Severity: "medium",
 				})
 			}
@@ -1113,7 +1117,7 @@ var aiRegistryImages = []string{
 //
 // Medium-confidence signals (Jetson when paired with an arch hint):
 //   - isaac-lab / isaac_ros / isaac-sim : NVIDIA Isaac stack (runs on x86 too;
-//                                          the arch hint disambiguates)
+//     the arch hint disambiguates)
 //
 // Architecture hints (Jetson is aarch64; combined with medium signal -> high):
 //   - aarch64 / -arm- / _arm / /arm/
@@ -1231,7 +1235,7 @@ func classifyHealthcareRepos(repos []string) (matched []string, confidence strin
 //
 // Medium-confidence (paired with adjacent signal -> high):
 //   - backtrader, zipline, lean-engine : backtesting frameworks (also used in
-//                                         analysis pipelines that aren't trading)
+//     analysis pipelines that aren't trading)
 //   - binance-, kraken-, coinbase-     : exchange-API wrappers
 var financeTradingHighSignals = []string{
 	"freqtrade",
@@ -1384,10 +1388,10 @@ func enumDockerRegistry(c *http.Client, svc ServiceMatch) EnumResult {
 			// is a pure function over the repo name list. Multiple classifiers
 			// can fire on the same registry (an operator with a mixed stack).
 			operatorClasses := []struct {
-				name      string
-				classify  func([]string) ([]string, string)
-				rawConf   string
-				rawRepos  string
+				name        string
+				classify    func([]string) ([]string, string)
+				rawConf     string
+				rawRepos    string
 				titlePrefix string
 			}{
 				{"Jetson / NVIDIA edge", classifyJetsonRepos, "jetson_confidence", "jetson_repos", "Jetson / NVIDIA edge"},
@@ -4208,10 +4212,11 @@ const (
 // Actor-attribution patterns (v1.9.10). Drawn from the 2026-05-17 150-host
 // campaign-scope probe (case study: meow-multi-actor-campaign-scope-2026-05-17.md).
 // Three actors share the read_me marker but use distinct contact/wallet schemas:
-//   Actor A (Meow / wendy.etabw) — bc1q38rjul6gdamfflf6p4ukz0ymtvfgfv2j9saf6r +
-//     wendy.etabw@gmx.com, paste URL tli.sh/73x1k (decrypts to follow-up note)
-//   Actor B (sharebot)            — db-recovery@sharebot.net
-//   Actor C (onionmail)           — scandal@onionmail.org
+//
+//	Actor A (Meow / wendy.etabw) — bc1q38rjul6gdamfflf6p4ukz0ymtvfgfv2j9saf6r +
+//	  wendy.etabw@gmx.com, paste URL tli.sh/73x1k (decrypts to follow-up note)
+//	Actor B (sharebot)            — db-recovery@sharebot.net
+//	Actor C (onionmail)           — scandal@onionmail.org
 var (
 	extortionBtcRe   = regexp.MustCompile(`bc1[0-9a-z]{20,80}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}`)
 	extortionEmailRe = regexp.MustCompile(`[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
@@ -4586,8 +4591,8 @@ func enumElasticsearch(c *http.Client, svc ServiceMatch) EnumResult {
 		}
 		if len(vectorFields) > 0 {
 			aiStackIndices = append(aiStackIndices, map[string]interface{}{
-				"index":          idx,
-				"vector_fields":  vectorFields,
+				"index":         idx,
+				"vector_fields": vectorFields,
 			})
 		}
 	}
@@ -5288,7 +5293,6 @@ func argoWorkflowsScanParams(item interface{}, r *EnumResult, ns string) {
 		}
 	}
 }
-
 
 // ── ML Governance / Data Catalog enumerators ─────────────────────────────────
 
