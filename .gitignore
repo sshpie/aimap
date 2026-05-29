@@ -2,3 +2,18 @@ aimap
 *.json
 dist/
 *.db
+
+# Live-scan / recon artifacts — never commit harvested target data.
+# Enforced alongside the pre-push data-leak gate. These match scan output
+# only; no tracked source file matches any pattern below (verified).
+#
+# Per-host recon dirs named after an IPv4 (e.g. 108_136_62_125/) — hold
+# whois/rdns/shodan/greynoise/passive-dns dumps for live targets.
+[0-9]*_[0-9]*_[0-9]*_[0-9]*/
+# Default scan-output tree (reports/, ndjson, etc.).
+output/
+# Harvested data formats that the *.json glob above does not cover.
+*.ndjson
+# Ad-hoc one-off probe scripts dropped at the repo root during a scan.
+*_probe*.py
+*probe*.py
