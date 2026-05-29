@@ -2954,7 +2954,7 @@ func clawdbotWSProbe(host string, port int, useTLS bool, timeout time.Duration) 
 			`"client":{"id":"clawdbot-control-ui","version":"dev","platform":"web","mode":"webchat","instanceId":"probe"},`+
 			`"role":"operator","scopes":["operator.admin","operator.approvals","operator.pairing"],`+
 			`"device":{"id":%q,"publicKey":%q,"signature":%q,"signedAt":%d,"nonce":%q},`+
-			`"caps":[],"auth":{},"userAgent":"aimap/1.0","locale":"en-US"}}`,
+			`"caps":[],"auth":{},"userAgent":"github.com/nuclide-research/aimap/1.0","locale":"en-US"}}`,
 		deviceID, pubB64, sigB64, signedAt, nonce,
 	)
 	if err := wsSendTextFrame(conn, []byte(connectPayload)); err != nil {
@@ -5416,7 +5416,7 @@ func enumApacheAtlas(c *http.Client, svc ServiceMatch) EnumResult {
 	req, err := http.NewRequest("GET", b+"/api/atlas/admin/version", nil)
 	if err == nil {
 		req.SetBasicAuth("admin", "admin")
-		req.Header.Set("User-Agent", "aimap/"+Version+" (security-research)")
+		req.Header.Set("User-Agent", "github.com/nuclide-research/aimap/"+Version+" (security-research)")
 		resp, err2 := c.Do(req)
 		if err2 == nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
