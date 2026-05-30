@@ -4,4 +4,4 @@ package main
 // the rest of the codebase reads from here (the banner in reporter.go, the
 // ToolVersion field in the JSON report, the User-Agent in utils.go, and the
 // -version flag in main.go).
-const Version = "1.9.39"
+const Version = "1.9.40"

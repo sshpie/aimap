@@ -138,8 +138,89 @@ var Fingerprints = []Fingerprint{
 				{Type: "json_field", Field: "data"},
 				{Type: "body_contains", Value: "vllm"},
 			}},
+			// GGUF-serving vLLM tags models owned_by:"local", so the body never
+			// contains "vllm" and the probe above misses it (field-observed
+			// 2026-05-29 on 144.76.75.252 serving gpt-oss-20b-GGUF). vLLM's
+			// /version returns {"model":"...","version":"0.x.x"} — the model+version
+			// two-field shape on the /version path is the reliable fallback signal.
+			{Path: "/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "model"},
+				{Type: "json_field", Field: "version"},
+			}},
 		},
 		Severity: "medium",
+	},
+
+	// ── LLM safety / guardrail ──────────────────────────────────
+	// LLM Guard (Protect AI) scanner API. Field-validated 2026-05-29 on
+	// 5.78.101.230:8000. GET / returns {"name":"LLM Guard API"} unauth.
+	// AUTH_TOKEN is opt-in; when unset, /analyze/prompt + /analyze/output
+	// run scanners with no auth (safety-layer bypass). Three-conjunct match
+	// (status + json_field name + the exact product string) rejects generic
+	// FastAPI roots that return a bare {"name":...}.
+	{
+		Name:         "LLM Guard API",
+		DefaultPorts: []int{8000, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "name"},
+				{Type: "body_contains", Value: "LLM Guard API"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// ── RAG / knowledge-base frameworks ─────────────────────────
+	// AnythingLLM. Field-validated 2026-05-29 on 213.239.218.83:3001.
+	// GET /api/setup-complete is UNAUTH and discloses auth posture:
+	// {"results":{"RequiresAuth":bool,"MultiUserMode":bool,...}}. The
+	// RequiresAuth + MultiUserMode field pair is AnythingLLM-unique; when
+	// RequiresAuth=false the web UI is open to any browser visitor (the dev
+	// REST API stays key-gated). Four conjuncts keep this off generic
+	// {"results":...} APIs.
+	{
+		Name:         "AnythingLLM",
+		DefaultPorts: []int{3001, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/setup-complete", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "results"},
+				{Type: "body_contains", Value: "RequiresAuth"},
+				{Type: "body_contains", Value: "MultiUserMode"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "AnythingLLM | Your personal LLM"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// ── Auth / policy engines ───────────────────────────────────
+	// Open Policy Agent. Field-validated 2026-05-29 (5/6 of an OPA sample
+	// unauth). OPA performs no authentication by default. GET / returns the
+	// ASCII-art diagnostic page with "Open Policy Agent" + "policy-enable";
+	// GET /v1/policies returns {"result":[{"id":"...rego","raw":"..."}]} —
+	// the full Rego policy list unauth (authz model + infra topology). Two
+	// probe alternates so OPA matches via the root page or the policy API.
+	{
+		Name:         "Open Policy Agent",
+		DefaultPorts: []int{8181, 8081},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Open Policy Agent"},
+				{Type: "body_contains", Value: "policy-enable"},
+			}},
+			{Path: "/v1/policies", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "result"},
+				{Type: "body_contains", Value: ".rego"},
+			}},
+		},
+		Severity: "high",
 	},
 
 	// ── Image generation / diffusion ────────────────────────────

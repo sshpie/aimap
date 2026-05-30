@@ -1,3 +1,23 @@
+## [v1.9.40] - 2026-05-29
+
+Fingerprint debt paydown from the 2026-05-29 7-category survey loop. Five surveys
+ran with platforms aimap could not fingerprint; manual verification carried them.
+Added/fixed, each field-validated against the confirmed live host:
+
+- **vLLM fix** — GGUF-serving vLLM tags models `owned_by:"local"`, so the existing
+  `/v1/models` + `body_contains:"vllm"` probe missed it (144.76.75.252 serving
+  gpt-oss-20b-GGUF). Added a `/version` probe (`model`+`version` two-field shape).
+  FP-checked against an OpenAI-compat relay (`/version` 404 → no match).
+- **LLM Guard API** (new, high) — `GET /` → `{"name":"LLM Guard API"}`. Safety-layer
+  bypass when AUTH_TOKEN unset.
+- **AnythingLLM** (new, medium) — `GET /api/setup-complete` unauth discloses
+  `RequiresAuth`+`MultiUserMode`; the field pair is the anchor.
+- **Open Policy Agent** (new, high) — `GET /` diagnostic page or `GET /v1/policies`
+  Rego list; the authz decision point in front of AI stacks.
+
+Deferred (could not field-validate a clean body): Casdoor (SPA empty root on
+re-probe), RAGFlow (root served unrelated meta; brand string is in a JS bundle).
+
 # Changelog
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
