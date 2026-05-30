@@ -1,3 +1,7 @@
+# Changelog
+
+All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
+
 ## [v1.9.40] - 2026-05-29
 
 Fingerprint debt paydown from the 2026-05-29 7-category survey loop. Five surveys
@@ -17,10 +21,6 @@ Added/fixed, each field-validated against the confirmed live host:
 
 Deferred (could not field-validate a clean body): Casdoor (SPA empty root on
 re-probe), RAGFlow (root served unrelated meta; brand string is in a JS bundle).
-
-# Changelog
-
-All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
 ## [v1.9.39] - 2026-05-29
 
