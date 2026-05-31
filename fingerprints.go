@@ -409,6 +409,204 @@ var Fingerprints = []Fingerprint{
 		Severity: "high",
 	},
 
+	// ── Service mesh / cluster introspection planes ─────────────
+	// Cat: Network Perimeter / Service Mesh, 2026-05-31. Built from
+	// data/platform-intel/service-mesh-perimeter-osint-2026-05-31.md.
+	//
+	// Category thesis: these planes describe the cluster's internal traffic
+	// by design (service graph, pod IPs, mesh identities, mTLS certs, L7
+	// metadata) and ship no-auth-by-default, substituting network placement
+	// (loopback / ClusterIP / NetworkPolicy) for authentication. Exposure
+	// therefore means the placement control ALREADY failed — so a reachable
+	// plane is almost always a fully-unauth cluster-recon API.
+	//
+	// Design (Insight #16 — a 200 is identity, not auth-state): the FIRST
+	// probe in each fingerprint is the data-layer endpoint whose 200+marker
+	// proves identity AND unauth at once (auth would 401, the probe fails).
+	// matchFingerprints records MatchPath on first hit, so the report
+	// disambiguates auth-state per host: a hit on the data path = unauth
+	// confirmed; a hit on the identity-only fallback = present-but-gated,
+	// downgrade at ledger time. Restraint (schema-recon): probes read only
+	// enough to classify — namespace/metric/config names — never workloads.
+	{
+		// Kiali — Istio mesh console (20001). `anonymous` auth strategy = full
+		// cluster-wide read via the Kiali ServiceAccount. /api/namespaces
+		// returning a populated JSON array unauth IS that leak; /api/config is
+		// reachable pre-auth (SPA bootstrap) so it still IDs token-gated installs.
+		Name:         "Kiali",
+		DefaultPorts: []int{20001, 443, 80},
+		Probes: []Probe{
+			{Path: "/api/namespaces", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+				{Type: "body_contains", Value: "name"},
+			}},
+			{Path: "/kiali/api/namespaces", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+				{Type: "body_contains", Value: "name"},
+			}},
+			{Path: "/api/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "istioNamespace"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Hubble UI — Cilium flow-visibility console. No auth, no login by
+		// design (assumes port-forward only). SPA title is the zero-FP anchor;
+		// the cluster-wide flow DATA lives behind the gRPC relay (4245),
+		// covered by a separate grpcurl lane (aimap is HTTP-only).
+		Name:         "Hubble UI",
+		DefaultPorts: []int{12000, 30120, 80, 443, 8080},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "<title>Hubble UI</title>"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// Linkerd viz dashboard (8084) — no auth layer by design; the only
+		// built-in guard is a Host-header regexp (DNS-rebind fix) that
+		// enforcedHostRegexp:.* disables. The namespace data-attribute is the
+		// verified-nuclei conjunct.
+		Name:         "Linkerd Viz",
+		DefaultPorts: []int{8084, 8085, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "data-controller-namespace=\"linkerd"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Linkerd proxy admin (4191) — binds 0.0.0.0, no auth, no TLS.
+		// /env.json leaks proxy env vars (creds if env-injected); /metrics
+		// leaks the workload graph via dst_* labels. Both unauth by
+		// construction. env.json first (credential-exposure severity).
+		Name:         "Linkerd Proxy Admin",
+		DefaultPorts: []int{4191},
+		Probes: []Probe{
+			{Path: "/env.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "LINKERD2_PROXY_"},
+			}},
+			{Path: "/metrics", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "proxy_build_info"},
+				{Type: "body_contains", Value: "inbound_http_authz"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Cilium metrics (9962 agent / 9963 operator / 9965 hubble) — no auth,
+		// default-on all-interface. cilium_drop_count_total and
+		// hubble_flows_processed_total are Cilium-exclusive metric namespaces;
+		// they leak the workload/flow-graph topology.
+		Name:         "Cilium Metrics",
+		DefaultPorts: []int{9962, 9963, 9965, 9090},
+		Probes: []Probe{
+			{Path: "/metrics", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "cilium_drop_count_total"},
+			}},
+			{Path: "/metrics", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "hubble_flows_processed_total"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// Istio sidecar Envoy admin (15000) — no auth, loopback-bound in-pod
+		// but reachable via exposed nodePort / co-tenant container.
+		// /config_dump = full mesh topology + ALL mTLS cert material this proxy
+		// holds + routing + filter chains. envoy.admin.v3 @type +
+		// .svc.cluster.local service name = Istio-managed Envoy, unauth.
+		Name:         "Istio Envoy Admin",
+		DefaultPorts: []int{15000},
+		Probes: []Probe{
+			{Path: "/config_dump", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "envoy.admin.v3"},
+				{Type: "body_contains", Value: ".svc.cluster.local"},
+			}},
+			{Path: "/server_info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "state"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// istiod debug (15014, also 8080) — structurally unauth pre-1.30
+		// (ENABLE_DEBUG_ENDPOINT_AUTH default-true only from 1.30.0).
+		// /debug/endpointz + /debug/registryz = the full service registry:
+		// every pod IP, ServiceAccount, namespace istiod's ClusterRole sees.
+		Name:         "Istiod Debug",
+		DefaultPorts: []int{15014, 8080},
+		Probes: []Probe{
+			{Path: "/debug/endpointz", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "svc.cluster.local"},
+				{Type: "body_contains", Value: "serviceAccount"},
+			}},
+			{Path: "/debug/registryz", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "svc.cluster.local"},
+				{Type: "body_contains", Value: "hostname"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Pomerium — identity-aware proxy (IS the auth layer). Presence is
+		// trivial + deterministic via the NAMESPACED jwks path; the real
+		// finding (a route with public_access:true fronting internal tooling)
+		// is behavioral and needs per-route probing aimap can't do generically.
+		// So this fingerprint is identity/attribution only — its value is the
+		// operator's real domain SANs for the VisorGraph cert-pivot. The
+		// /.well-known/pomerium/ prefix distinguishes it from generic OIDC.
+		Name:         "Pomerium",
+		DefaultPorts: []int{443, 80},
+		Probes: []Probe{
+			{Path: "/.well-known/pomerium/jwks.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "keys"},
+				{Type: "body_contains", Value: "ES256"},
+			}},
+		},
+		Severity: "low",
+	},
+	{
+		// Kubernetes API server (6443/8443) — surfaced here via the Cilium
+		// cluster-cert pivot (*.<cluster>.hubble-grpc.cilium.io leaf). /version
+		// is anonymous-allowed by default and IDs the control plane; the
+		// FINDING is anonymous-auth: /api/v1/namespaces returning a populated
+		// item list unauth = system:anonymous bound to cluster read.
+		Name:         "Kubernetes API",
+		DefaultPorts: []int{6443, 8443},
+		Probes: []Probe{
+			{Path: "/api/v1/namespaces", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "\"kind\":\"NamespaceList\""},
+				{Type: "json_field", Field: "items"},
+			}},
+			{Path: "/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gitVersion"},
+				{Type: "body_contains", Value: "buildDate"},
+			}},
+		},
+		Severity: "high",
+	},
+
 	// ── Auth / policy engines ───────────────────────────────────
 	// Open Policy Agent. Field-validated 2026-05-29 (5/6 of an OPA sample
 	// unauth). OPA performs no authentication by default. GET / returns the

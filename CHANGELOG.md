@@ -2,6 +2,21 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.42] - 2026-05-31
+
+Service mesh / cluster introspection planes: 9 new fingerprints for the Network
+Perimeter / Service Mesh survey (Kiali, Hubble UI, Linkerd Viz, Linkerd Proxy Admin,
+Cilium Metrics, Istio Envoy Admin, Istiod Debug, Pomerium, Kubernetes API). Built
+from data/platform-intel/service-mesh-perimeter-osint-2026-05-31.md. The category
+has no authentication layer (network-placement-as-auth), so each fingerprint orders
+its data-layer probe first: a 200 plus marker on /kiali/api/namespaces, /config_dump,
+or /debug/endpointz proves identity AND unauthenticated state at once (auth returns
+401, the probe fails). MatchPath then classifies auth-state in a single run (Insight
+#16). Re-curated the network-mesh port class to the real introspection ports
+(4191, 4245, 6443, 8084/8085, 9962-9965, 12000, 15000-15014, 20001, 30120). 19 TP/FP
+unit tests (fingerprints_servicemesh_test.go), full suite green. gRPC tier (Hubble
+Relay 4245) remains a known gap: aimap is HTTP-only, covered by a grpcurl manual lane.
+
 ## [v1.9.41] - 2026-05-31
 
 Cat-07 RAG framework servers: 13 new fingerprints ahead of the population survey

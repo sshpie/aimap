@@ -52,10 +52,15 @@ var PortClasses = map[string][]int{
 		80, 443, 5000, 5001, 2376, 2377, 8080, 8081, 8443, 9000, 9090,
 	},
 
-	// Network/service mesh control planes (Envoy admin, Istio, Linkerd,
-	// Pomerium, Consul Connect, Cilium Hubble).
+	// Network/service mesh control + observability planes. Re-curated
+	// 2026-05-31 from data/platform-intel/service-mesh-perimeter-osint to
+	// the ports the introspection planes actually bind: Linkerd proxy-admin
+	// 4191 + viz 8084/8085, Hubble Relay 4245 (gRPC) + UI 12000/30120,
+	// k8s api 6443/8443, Cilium metrics 9962/9963/9965, Envoy admin 15000,
+	// istiod xDS/debug 15010/15012/15014, Kiali 20001.
 	"network-mesh": {
-		8001, 9090, 9091, 9092, 9901, 15010, 15012, 15014, 4040, 4191, 9999,
+		80, 443, 4191, 4245, 6443, 8084, 8085, 8443, 9090, 9962, 9963,
+		9965, 12000, 15000, 15010, 15012, 15014, 20001, 30120,
 	},
 
 	// Workflow orchestration (Prefect, Dagster, Temporal, Argo, Kubeflow,
