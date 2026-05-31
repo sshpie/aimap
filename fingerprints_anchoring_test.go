@@ -179,17 +179,17 @@ func TestKubeflow_RejectsMarketingMention(t *testing.T) {
 	}
 }
 
-// ── Clawdbot ────────────────────────────────────────────────────────
+// ── OpenClaw (Molty) ────────────────────────────────────────────────
 
-func TestClawdbot_RejectsNon200(t *testing.T) {
+func TestOpenClaw_RejectsNon200(t *testing.T) {
 	pr := PortResult{
 		Host: "203.0.113.70", Port: 18789, Open: true,
 		StatusCode: 404, ContentType: "text/html",
 		Headers:     map[string]string{"Content-Type": "text/html"},
 		BodySnippet: `<html><body>Not Found — looking for clawdbot-app</body></html>`,
 	}
-	if probeFires(t, "Clawdbot", "/", pr) {
-		t.Fatal("Clawdbot FP fired on a 404 page (status_code anchor violated)")
+	if probeFires(t, "OpenClaw", "/", pr) {
+		t.Fatal("OpenClaw FP fired on a 404 page (status_code anchor violated)")
 	}
 }
 

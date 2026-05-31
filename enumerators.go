@@ -118,7 +118,7 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"Anti-detect CDP server": enumAntiDetectCDP,
 	"Mem0":                   enumMem0,
 	"Coolify":                enumCoolify,
-	"Clawdbot":               enumClawdbot,
+	"OpenClaw":               enumOpenClaw,
 
 	// Compute orchestration / workflow
 	"n8n":            enumN8n,
@@ -2820,9 +2820,9 @@ func enumCoolify(c *http.Client, svc ServiceMatch) EnumResult {
 	return r
 }
 
-// ── Clawdbot ─────────────────────────────────────────────────────────
+// ── OpenClaw (Molty) ──────────────────────────────────────────────────
 
-func enumClawdbot(c *http.Client, svc ServiceMatch) EnumResult {
+func enumOpenClaw(c *http.Client, svc ServiceMatch) EnumResult {
 	r := mkResult(svc)
 	b := svc.BaseURL
 
@@ -2846,7 +2846,7 @@ func enumClawdbot(c *http.Client, svc ServiceMatch) EnumResult {
 	// Probe the WebSocket gateway — the SPA is a catch-all so HTTP paths are
 	// useless for auth detection; the real backend is a WS gateway.
 	useTLS := strings.HasPrefix(svc.BaseURL, "https://")
-	authStatus, wsDetail := clawdbotWSProbe(svc.Host, svc.Port, useTLS, 6*time.Second)
+	authStatus, wsDetail := openClawWSProbe(svc.Host, svc.Port, useTLS, 6*time.Second)
 	r.AuthStatus = authStatus
 	if wsDetail != "" {
 		r.Details = append(r.Details, wsDetail)
@@ -2856,7 +2856,7 @@ func enumClawdbot(c *http.Client, svc ServiceMatch) EnumResult {
 	case "none":
 		r.Findings = append(r.Findings, Finding{
 			Category: "access",
-			Title:    "Clawdbot gateway accessible without authentication",
+			Title:    "OpenClaw gateway accessible without authentication",
 			Detail:   "WebSocket gateway accepts connections without a valid token.",
 			Severity: "critical",
 		})
@@ -2866,7 +2866,7 @@ func enumClawdbot(c *http.Client, svc ServiceMatch) EnumResult {
 
 	r.Findings = append(r.Findings, Finding{
 		Category: "exposure",
-		Title:    "Clawdbot Control UI exposed to internet",
+		Title:    "OpenClaw Control UI exposed to internet",
 		Detail:   "OpenClaw management interface accessible publicly; intended for Tailscale/VPN-only access.",
 		Severity: "medium",
 	})
@@ -2874,9 +2874,9 @@ func enumClawdbot(c *http.Client, svc ServiceMatch) EnumResult {
 	return r
 }
 
-// clawdbotWSProbe performs a minimal WebSocket handshake and connect probe
-// to determine the Clawdbot gateway auth posture without external dependencies.
-func clawdbotWSProbe(host string, port int, useTLS bool, timeout time.Duration) (authStatus, detail string) {
+// openClawWSProbe performs a minimal WebSocket handshake and connect probe
+// to determine the OpenClaw gateway auth posture without external dependencies.
+func openClawWSProbe(host string, port int, useTLS bool, timeout time.Duration) (authStatus, detail string) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 
 	var conn net.Conn

@@ -539,7 +539,7 @@ is unsound at population scale"). v1.9.19 closes all 24.
 - **Whisper ASR `/inference`**: anchored to `status_code=400` (the spec-mandated
   error response when probed without multipart body).
 - **dcm4chee `/dcm4chee-arc/` fallback**: added `status_code=200`.
-- **Clawdbot, Coolify, Dify, OpenHands HTML-title probes**: added
+- **OpenClaw, Coolify, Dify, OpenHands HTML-title probes**: added
   `status_code=200` to all four. The title tag was already a structured
   signal; status anchor closes the 500/404-page-with-title FP class.
 
@@ -1741,7 +1741,7 @@ Coverage release. Backward-compatible: no CLI, JSON schema, or existing-fingerpr
 - `5678` — n8n
 - `9000` — MinIO API
 - `30000` — SGLang, OpenHands NodePort default
-- `18789` — Clawdbot
+- `18789` — OpenClaw (Molty)
 
 **Fingerprints** — 13 new entries (23 → 36 total):
 
@@ -1758,7 +1758,7 @@ Coverage release. Backward-compatible: no CLI, JSON schema, or existing-fingerpr
 | OpenHands | 3000, 30000 | `<title>OpenHands</title>` + admin console body | Critical — autonomous agent platform |
 | Mem0 | 8888 | `/docs` "Mem0 REST APIs" | High — agent memory store with PII |
 | Coolify | 8000, 443 | `coolify_session` Set-Cookie | Low — self-hosted PaaS |
-| Clawdbot | 18789, 443, 80 | `clawdbot-app` body | Medium |
+| OpenClaw (Molty) | 18789, 443, 80 | `clawdbot-app` body | Medium |
 | Open Directory | 9090, 8080, 8000, 4000 | "Directory listing for" / "Index of /" | High — Python http.server / nginx autoindex exposure |
 
 **Deep enumerators** — 15 new dedicated enumerators (11 → 26 total):
@@ -1779,7 +1779,7 @@ Coverage release. Backward-compatible: no CLI, JSON schema, or existing-fingerpr
 - **`enumCoolify`** — installer claim state, server registration check
 - **`enumClawdbot`** — version + auth fingerprint
 
-**New category — AI agent platforms**: OpenHands, Mem0, Coolify, Clawdbot.
+**New category — AI agent platforms**: OpenHands, Mem0, Coolify, OpenClaw.
 
 **New category — Observability / infra co-deployed with AI stacks**: Grafana, Prometheus, etcd, MinIO, n8n alongside Langfuse.
 

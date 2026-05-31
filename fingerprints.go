@@ -2426,11 +2426,11 @@ var Fingerprints = []Fingerprint{
 		Severity: "low",
 	},
 	{
-		Name:         "Clawdbot",
+		Name:         "OpenClaw",
 		DefaultPorts: []int{18789, 443, 80},
 		Probes: []Probe{
-			// clawdbot-app is the React app's root element id — appears in the
-			// real-deployment HTML and not in upstream docs / marketing pages.
+			// clawdbot-app is the React root element id embedded in the product HTML
+			// (internal name; marketing name is "Openclaw" by vendor Molty).
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "clawdbot-app"},

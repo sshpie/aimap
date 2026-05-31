@@ -7,9 +7,17 @@
 [![Release](https://img.shields.io/github/v/release/Nicholas-Kloster/aimap)](https://github.com/Nicholas-Kloster/aimap/releases)
 [![Stars](https://img.shields.io/github/stars/Nicholas-Kloster/aimap)](https://github.com/Nicholas-Kloster/aimap/stargazers)
 
-**nmap for AI infrastructure.** Purpose-built scanner for LLMs, vector databases, ML model servers, agent platforms, observability stacks, and 100+ other AI/ML services. Defenders run it against their own networks to find shadow AI before attackers do. NuClide research runs it against authorized populations to map exposure at scale.
+**nmap for AI infrastructure.** Purpose-built scanner for LLMs, vector databases, ML model servers, agent platforms, observability stacks, and 180+ other AI/ML services. Defenders run it against their own networks to find shadow AI before attackers do. NuClide research runs it against authorized populations to map exposure at scale.
 
 Single Go binary. Zero external dependencies. Read-only HTTP probes. Safe for production.
+
+## About the Engine
+
+`aimap` is the core scanning engine of the NuClide Research AI-ASM (AI Attack Surface Management) platform. It is a purpose-built, high-concurrency Go toolchain designed to actively discover and fingerprint the shadow AI perimeter.
+
+Traditional Cloud Security Posture Management (CSPM) and legacy vulnerability scanners are blind to the agentic era. They scan for known CVEs on legacy web ports, completely missing the unauthenticated ML orchestration frameworks, distributed vector databases, and LLM inference endpoints being rapidly deployed outside of centralized IT control.
+
+By combining massive parallel scanning with ML-specific protocol "knocks" (REST, gRPC, and GraphQL), `aimap` accurately identifies exposed instances of Ollama, Weaviate, Ray, MLflow, and dozens of other AI infrastructure components. It translates raw perimeter exposures into structured JSON telemetry, designed to feed directly into visualization dashboards or downstream SIEMs.
 
 ## Why aimap exists
 
@@ -23,9 +31,9 @@ Security teams can't secure what they can't see, and AI adoption moves faster th
 
 Generic scanners (`nmap`, `nuclei`) don't identify these as AI services, so they don't show up in the security team's inventory. aimap does.
 
-The 121 fingerprints in this release were forged from population-scale exposure surveys: 16,000+ unauthenticated Ollama deployments, 13,000+ Docker registries, 10,000+ NVIDIA Jetson edge devices, hundreds of extortion-wiped Elasticsearch clusters. Every fingerprint that ships passes the population-FP discipline: multi-condition matches anchored to status code + JSON shape + body, with a named regression test for every false-positive class the survey burned. Case studies are published at [nuclide-research.com](https://nuclide-research.com).
+The 183 fingerprints in this release were forged from population-scale exposure surveys: 16,000+ unauthenticated Ollama deployments, 13,000+ Docker registries, 10,000+ NVIDIA Jetson edge devices, hundreds of extortion-wiped Elasticsearch clusters. Every fingerprint that ships passes the population-FP discipline: multi-condition matches anchored to status code + JSON shape + body, with a named regression test for every false-positive class the survey burned. Case studies are published at [nuclide-research.com](https://nuclide-research.com).
 
-## What it detects (121 services, 50 deep enumerators)
+## What it detects (183 services, 62 deep enumerators)
 
 | Category | Services |
 |---|---|
@@ -36,7 +44,7 @@ The 121 fingerprints in this release were forged from population-scale exposure 
 | Model serving | TensorFlow Serving, Triton Inference Server, NVIDIA NIM |
 | ML platforms / experiment tracking | MLflow, Weights & Biases, WandB Service, ClearML, Aim |
 | Orchestration / UI | LangServe, Flowise, Dify, Open WebUI, SillyTavern, LiteLLM, One API, NewAPI, BentoML, sub2api |
-| AI agent platforms | OpenHands, AutoGen Studio, Anti-detect CDP server, Mem0, Coolify, Clawdbot |
+| AI agent platforms | OpenHands, AutoGen Studio, Anti-detect CDP server, Mem0, Coolify, OpenClaw |
 | MCP | MCP Server |
 | Code assistants | Sourcegraph, Sourcebot, Sweep AI, Tabnine Context Engine, Dyad, bolt.diy, Refact |
 | Agent memory / data | Mem0, Argilla, Zep, Letta |
@@ -54,7 +62,7 @@ The 121 fingerprints in this release were forged from population-scale exposure 
 | Notebooks / dev / adjacent | Jupyter Notebook, Open Directory, Docker Registry |
 | Cross-cutting | Exposed API Credentials (Langfuse, Helicone, Stripe, Anthropic, LangSmith, OpenRouter, Slack — surfaces vendor keys in HTTP responses independent of the host's primary service) |
 
-Each service has a dedicated fingerprint. 50 of the 121 services also have dedicated deep enumerators that surface PII fields, unauthenticated RCE, exposed credentials, claimable admin states, and other actionable findings.
+Each service has a dedicated fingerprint. 62 of the 183 services also have dedicated deep enumerators that surface PII fields, unauthenticated RCE, exposed credentials, claimable admin states, and other actionable findings.
 
 ## Port profiles (`-ports-class`)
 
@@ -198,8 +206,8 @@ Terminal output is colorized, human-readable, and includes per-service risk scor
 |------|---------|
 | `main.go` | CLI entry point, 3-phase orchestration, flag parsing |
 | `scanner.go` | Parallel TCP connect + HTTP probe (Phase 1) |
-| `fingerprints.go` | 121-entry fingerprint database + match engine (Phase 2) |
-| `enumerators.go` | 50 service-specific deep enumerators + credential/secret scanners (Phase 3) |
+| `fingerprints.go` | 183-entry fingerprint database + match engine (Phase 2) |
+| `enumerators.go` | 62 service-specific deep enumerators + credential/secret scanners (Phase 3) |
 | `adjacency.go` | ML-adjacency rule — data-tier ports on hosts with confirmed AI services (Insight #20) |
 | `reporter.go` | Colored terminal output + JSON export |
 | `utils.go` | HTTP client, JSON helpers, CIDR parsing, worker pool, target normalization |
@@ -215,7 +223,7 @@ PRs welcome.
 
 aimap is active — it performs TCP connections and HTTP GETs. **Only scan systems you own or have explicit written authorization to test.** Unauthorized scanning of third-party infrastructure may violate local computer-misuse laws.
 
-For passive reconnaissance of external targets, use dedicated OSINT tools instead (Shodan, Censys, Certificate Transparency logs).
+For passive reconnaissance of external targets, use dedicated OSINT tools instead (Shodan, Censys, Certificate Transparency logs). aimap is designed to consume the IP lists those tools produce — Shodan dork exports, Censys API results, and CT-log cert-pivot outputs feed directly into `-list`.
 
 aimap does not:
 
@@ -225,6 +233,34 @@ aimap does not:
 - Modify, delete, or create anything on target systems
 
 All probes are HTTP GETs. All findings are derived from public-endpoint responses.
+
+## Censys integration
+
+Censys labels AI-infrastructure hosts at the service level (`host.services.labels.value = "AI"`), giving a pre-classified starting population of ~271K hosts (as of 2026-05). aimap is designed to fingerprint that population precisely: Censys identifies that a host *is* AI infrastructure; aimap identifies *which* AI service and *whether* it is authenticated.
+
+```bash
+# 1. Export AI-labeled hosts from Censys Search (free tier: first page; research tier: full dataset)
+#    Query: host.services.labels.value = "AI" and host.services.port = 11434
+#    Export IPs to censys-ai-ollama.txt
+
+# 2. Run aimap against the Censys population
+aimap -list censys-ai-ollama.txt -ports-class llm-gateway -threads 50 -o censys-aimap.json
+
+# 3. Triage critical findings
+jq '.enum_results[] | select(.risk_level == "critical") | {ip, service, findings}' censys-aimap.json
+```
+
+The `censys-sweep.py` script in [AI-LLM-Infrastructure-OSINT](https://github.com/nuclide-research/AI-LLM-Infrastructure-OSINT) handles the full workflow: Censys API query, cross-reference against existing Shodan populations, SAN extraction for cert-pivot, and delta-merge so the downstream aimap run sees the combined population.
+
+Censys-specific query patterns for the AI survey program:
+
+| Platform | Censys query |
+|---|---|
+| Ollama | `host.services.labels.value = "AI" and host.services.port = 11434` |
+| n8n | `host.services.labels.value = "AI" and host.services.port = 5678` |
+| Jupyter | `host.services.labels.value = "AI" and host.services.port = 8888` |
+| Any AI service | `host.services.labels.value = "AI"` (~271K hosts) |
+| Plus CT-log pivot | `services.certificate.leaf_data.subject_dn: "<platform name>"` |
 
 ## Integration examples
 
@@ -291,7 +327,9 @@ MIT. See [LICENSE](LICENSE).
 
 aimap is the fingerprint engine NuClide research surveys run on. The tool is open source under MIT. The methodology is published. The case studies are public.
 
-Defenders run aimap against their own networks. Researchers run it against authorized populations. The 121 fingerprints come from real survey work: hundreds of thousands of probes across exposed Ollama deployments, Weaviate vector databases, MLflow trackers, Langfuse instances, Docker registries, NVIDIA Jetson edge devices, Frigate camera fleets, Elasticsearch clusters, code-assistant servers, and the long tail of AI services that ship `--host 0.0.0.0` by default.
+Defenders run aimap against their own networks. Researchers run it against authorized populations. The 183 fingerprints come from real survey work: 30+ platform categories, hundreds of thousands of probes across exposed Ollama deployments, Weaviate vector databases, MLflow trackers, Langfuse instances, Docker registries, NVIDIA Jetson edge devices, Frigate camera fleets, Elasticsearch clusters, code-assistant servers, and the long tail of AI services that ship `--host 0.0.0.0` by default.
+
+Survey scope (selected results, all published): 16,473 unauthenticated Ollama instances · 13,631 Weaviate PII exposures · 67 unauthenticated Kubecost cost APIs (Extreme Networks helmValues confirmed) · 52 unauthenticated OpenHands agent platforms · 6 unauthenticated voice/audio AI pipelines · 45+ survey categories completed. Findings reported to CISA, government CERTs, and enterprise vendors. Cross-platform auth-on-default thesis confirmed across 30+ platform classes.
 
 Every fingerprint passes a population-FP discipline before it ships: multi-condition `Matches[]` anchored to status code + JSON shape + body, with a named regression test for every false-positive class the survey burned. The discipline is enforced because at population scale, a 0.1% FP rate against 10,000 hosts means 10 wrong findings, and the noise breaks the survey.
 
