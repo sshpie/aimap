@@ -2,6 +2,17 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.41] - 2026-05-31
+
+Cat-07 RAG framework servers: 13 new fingerprints ahead of the population survey
+(LightRAG, PrivateGPT, txtai, Cognita, R2R, Kotaemon, Quivr, Danswer/Onyx, Verba,
+DocsGPT, Ragapp, Perplexica, RAGFlow). Built from the 2026-05-27 pre-assessment
+intel; each probe re-implements an already-validated Shodan dork as an active probe.
+Distinctive product tokens used as single anchors; common-word names (R2R, txtai,
+Onyx) require a second conjunct per the Insight #6 rule. AnythingLLM/Flowise/Dify
+already shipped. Identity-only (no deep enumerators yet); auth classification runs
+via the survey verification probe.
+
 ## [v1.9.40] - 2026-05-29
 
 Fingerprint debt paydown from the 2026-05-29 7-category survey loop. Five surveys

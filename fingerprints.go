@@ -198,6 +198,217 @@ var Fingerprints = []Fingerprint{
 		Severity: "medium",
 	},
 
+	// ── RAG Framework Servers (Cat-07, 2026-05-31) ──────────────
+	// Built from data/platform-intel/rag-frameworks-osint-2026-05-27.md.
+	// Each probe re-implements a Shodan dork already validated in
+	// shodan/queries/rag-frameworks-queries.md as an active probe.
+	// Distinctive product names (LightRAG, goldenverba, Perplexica,
+	// kotaemon, ragapp) act as marker anchors; common-word names
+	// (R2R, txtai, Onyx) require a second conjunct (Insight #6).
+	{
+		// LightRAG — GraphRAG server, port 9621 (LightRAG-exclusive).
+		// Auth off by default; /health is always unauthenticated and the
+		// Ollama-compat endpoints stay open even with API-key auth on.
+		Name:         "LightRAG",
+		DefaultPorts: []int{9621},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "LightRAG"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "LightRAG"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// PrivateGPT — offline RAG, port 8001. Auth off by default
+		// (auth.enabled:false). /v1/ingest/* paths do not exist in stock
+		// OpenAI-compatible servers — clean identity signal.
+		Name:         "PrivateGPT",
+		DefaultPorts: []int{8001},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "PrivateGPT"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "PrivateGPT"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// txtai — semantic search/RAG, port 8080 (SHARED). Auth fully open
+		// by default. Require the openapi spec carry both the name and the
+		// txtai-specific /workflow path — two conjuncts on a shared port.
+		Name:         "txtai",
+		DefaultPorts: []int{8080, 8000},
+		Probes: []Probe{
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "txtai"},
+				{Type: "body_contains", Value: "/workflow"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Cognita (TrueFoundry) — RAG pipeline, port 8000 (SHARED).
+		// Auth off in default local compose. Require both the app name and
+		// the truefoundry operator string.
+		Name:         "Cognita",
+		DefaultPorts: []int{8000, 5001},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "cognita"},
+				{Type: "body_contains", Value: "truefoundry"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// R2R (SciPhi) — RAG framework, port 7272 (R2R-exclusive). Auth off
+		// by default. /v3/ path prefix + health response shape; "R2R" is a
+		// common token so anchor on the v3 health JSON shape.
+		Name:         "R2R",
+		DefaultPorts: []int{7272},
+		Probes: []Probe{
+			{Path: "/v3/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "results"},
+				{Type: "body_contains", Value: "response"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Kotaemon — document-QA Gradio UI, port 7860 (SHARED with SD/Whisper
+		// Gradio apps). Default creds admin/admin. "kotaemon" is a unique
+		// product token, safe as a single anchor on the shared port.
+		Name:         "Kotaemon",
+		DefaultPorts: []int{7860},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "kotaemon"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Quivr — second-brain RAG, port 5050 (Quivr backend default).
+		// Auth on by default (Supabase JWT); fingerprint is identity-only.
+		Name:         "Quivr",
+		DefaultPorts: []int{5050},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Quivr"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// Danswer / Onyx — enterprise AI search, port 3000 (SHARED). Danswer
+		// is a distinctive legacy token; Onyx is a common word so requires
+		// the "connector" conjunct.
+		Name:         "Danswer/Onyx",
+		DefaultPorts: []int{3000, 8080},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Danswer"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Onyx"},
+				{Type: "body_contains", Value: "connector"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Verba (Weaviate) — RAG app, port 8000 (SHARED). Auth off by design.
+		// The PyPI package token "goldenverba" appears in the bundle and is
+		// highly distinctive — safe single anchor.
+		Name:         "Verba",
+		DefaultPorts: []int{8000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "goldenverba"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// DocsGPT — documentation QA, port 5001. Auth off by default;
+		// pre-auth RCE CVE-2025-0868 on v0.8.1-v0.12.0. Identity on the
+		// distinctive product name.
+		Name:         "DocsGPT",
+		DefaultPorts: []int{5001},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "DocsGPT"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Ragapp — agentic RAG (LlamaIndex), port 8000 (SHARED). No auth by
+		// design; /admin is an unauthenticated admin UI. Require app name +
+		// the /admin path conjunct.
+		Name:         "Ragapp",
+		DefaultPorts: []int{8000},
+		Probes: []Probe{
+			{Path: "/admin/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "ragapp"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "ragapp"},
+				{Type: "body_contains", Value: "llamaindex"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Perplexica — private Perplexity, port 3000 (SHARED). No auth by
+		// default; devs advise against public exposure. Distinctive product
+		// token.
+		Name:         "Perplexica",
+		DefaultPorts: []int{3000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Perplexica"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// RAGFlow — deep-document RAG, port 80 (nginx front, SHARED) and 9380
+		// (internal API). Default creds admin@ragflow.io/admin. Port 80 is
+		// very shared; require both the SPA token and a second app string.
+		Name:         "RAGFlow",
+		DefaultPorts: []int{80, 9380, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "ragflow"},
+				{Type: "body_contains", Value: "RAGFlow"},
+			}},
+		},
+		Severity: "high",
+	},
+
 	// ── Auth / policy engines ───────────────────────────────────
 	// Open Policy Agent. Field-validated 2026-05-29 (5/6 of an OPA sample
 	// unauth). OPA performs no authentication by default. GET / returns the
