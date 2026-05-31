@@ -2,6 +2,31 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.44] - 2026-05-31
+
+Data-labeling fingerprint correction (follow-up to v1.9.43, same survey). doccano:
+removed the /v1/health identity probe added in v1.9.43 — {"status":...} has no
+doccano marker and false-positived on Label Studio hosts (whose reverse proxy
+also serves a /v1/health with a status field). doccano identity reverts to the
+root-page "doccano" marker; /v1/health liveness + /v1/projects auth-state live in
+the survey verification probe. Documented a CVAT detection gap: CVAT's
+/api/server/about needs an Accept: application/vnd.cvat+json header (DRF
+AcceptHeaderVersioning) that aimap's header-less Probe cannot send, so the CVAT
+fingerprint will not fire live until request-header support is added;
+data/datalabel-probe.py covers CVAT meanwhile. Regression test added.
+
+## [v1.9.43] - 2026-05-31
+
+Data-labeling fingerprint fixes from the Stage -1 OSINT pass (Label Studio,
+CVAT, Argilla, doccano, Prodigy). CVAT: fixed the GCP-IAP catch-all false
+positive (reference_aimap_cvat_iap_fp) by requiring /api/server/about to return
+the JSON version field AND the full product name, so an HTML 200 mentioning
+"cvat" can no longer match. Prodigy: fixed the name-collision FP (the band /
+music / games share the <title>Prodigy</title>) by anchoring on the auth-free
+/health {"status":"alive"} JSON and the prodigy.js bundle. Argilla: added the v2
+/api/v1/version path (HF-managed instances). doccano: anchored on the unauth
+/v1/health JSON. New TP/FP unit tests in fingerprints_datalabeling_test.go.
+
 ## [v1.9.42] - 2026-05-31
 
 Service mesh / cluster introspection planes: 9 new fingerprints for the Network

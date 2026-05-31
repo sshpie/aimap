@@ -724,8 +724,15 @@ var Fingerprints = []Fingerprint{
 		Name:         "Argilla",
 		DefaultPorts: []int{80, 443, 6900},
 		Probes: []Probe{
-			// /api/_info is Argilla's canonical public endpoint — version-only
-			// disclosure. Data layer (/api/me) is auth-gated. Tier-C.
+			// Argilla v2 (current, HF-managed) public version endpoint.
+			{Path: "/api/v1/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "version"},
+			}},
+			// Argilla v1 (legacy) public info endpoint. Data layer (/api/v1/me)
+			// is auth-gated; default key argilla.apikey is the misconfig class
+			// (intel only, not exercised).
 			{Path: "/api/_info", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "version"},
@@ -792,9 +799,19 @@ var Fingerprints = []Fingerprint{
 		Name:         "CVAT",
 		DefaultPorts: []int{8080, 8081, 80, 443},
 		Probes: []Probe{
+			// Anti-IAP-FP (reference_aimap_cvat_iap_fp): a GCP IAP catch-all
+			// returns HTML 200, not the application/vnd.cvat+json object. Require
+			// the JSON version field AND the full product name so a bare 200 with
+			// "cvat" anywhere in HTML cannot match.
+			// KNOWN GAP (2026-05-31): CVAT uses DRF AcceptHeaderVersioning, so
+			// /api/server/about needs an Accept: application/vnd.cvat+json request
+			// header to return this JSON; aimap's Probe has no request-header field,
+			// so this fingerprint will NOT fire live until that support is added.
+			// The survey verification probe (data/datalabel-probe.py) covers CVAT.
 			{Path: "/api/server/about", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
-				{Type: "body_contains", Value: "cvat"},
+				{Type: "json_field", Field: "version"},
+				{Type: "body_contains", Value: "Computer Vision Annotation Tool"},
 			}},
 		},
 		Severity: "medium",
@@ -803,7 +820,12 @@ var Fingerprints = []Fingerprint{
 		Name:         "Doccano",
 		DefaultPorts: []int{8000, 3000, 80, 443},
 		Probes: []Probe{
-			// Doccano root page title
+			// Identity anchor: doccano SPA root carries the "doccano" marker.
+			// NOTE: /v1/health ({"status":"green"}) is deliberately NOT an identity
+			// probe — it has no doccano marker and false-positived on Label Studio
+			// hosts (the LS reverse proxy also serves a /v1/health with a "status"
+			// field). The /v1/health liveness + /v1/projects auth-state checks live
+			// in the survey verification probe (data/datalabel-probe.py), not here.
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "doccano"},
@@ -816,10 +838,17 @@ var Fingerprints = []Fingerprint{
 		Name:         "Prodigy",
 		DefaultPorts: []int{8080, 8081, 8000},
 		Probes: []Probe{
-			// Prodigy's annotation UI is auth-free by design (Tier-A*)
+			// Anti-name-collision (Prodigy band/music/games share the title):
+			// anchor on the auth-free /health JSON (status:alive) and the
+			// prodigy.js bundle, never a bare "Prodigy" title.
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "status"},
+				{Type: "body_contains", Value: "alive"},
+			}},
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
-				{Type: "body_contains", Value: "<title>Prodigy</title>"},
+				{Type: "body_contains", Value: "prodigy.js"},
 			}},
 		},
 		Severity: "high", // unauth annotation UI exposed = workflow visibility
