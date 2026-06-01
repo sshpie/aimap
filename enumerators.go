@@ -184,6 +184,9 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"Open Directory":   enumOpenDirectory,
 	"Docker Registry":  enumDockerRegistry,
 
+	// Model Context Protocol
+	"MCP Server": enumMCP,
+
 	// Cross-cutting
 	"Exposed API Credentials": enumExposedCredentials,
 }

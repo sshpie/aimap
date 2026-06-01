@@ -2,6 +2,27 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.45] - 2026-05-31
+
+MCP deep enumerator (`enumMCP`). The "MCP Server" fingerprint already detected
+presence (9 disjunctive probes, 88-server-derived); it had no registered deep
+enumerator, so a match produced only a bare `mkResult` — identity without auth
+state or tool surface (the Stage-1-vs-Stage-2 gap, Insight #16). `enumMCP` closes
+it: it runs the active JSON-RPC `initialize` handshake (Streamable HTTP `POST /mcp`
+with `Accept: application/json, text/event-stream`; root and fingerprint-path
+fallbacks; SSE-framed responses unwrapped), gates on protocol-shape conformance
+(protocolVersion in the closed spec-date set + non-empty serverInfo.name — the
+honeypot discriminator, Insight #1), then enumerates the tool surface via
+`tools/list` and classifies auth state (200+result = unauthenticated; 401/403 +
+`WWW-Authenticate` = OAuth-configured, not a finding). Tool-surface severity is a
+bag-of-fields classifier over the tool-name set (`execute_command`/`write_file`/
+`kubectl`/`get_secret` → critical; filesystem-read/database → high; network →
+medium). sparfenyuk/mcp-proxy is identified by its vendor-unique `/status`
+`server_instances` map. RESTRAINT (schema-recon): names, descriptions, and input
+schemas only — `tools/call` and `resources/read` are never invoked; findings
+carry `data_accessed: false`. An end-to-end test asserts the no-invocation
+guarantee. 18 new test cases (unit + integration). No fingerprint changes.
+
 ## [v1.9.44] - 2026-05-31
 
 Data-labeling fingerprint correction (follow-up to v1.9.43, same survey). doccano:
