@@ -2,6 +2,37 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.46] - 2026-06-01
+
+4 new AI Gateway fingerprints (Cat-32 survey). All derived from primary-source
+Shodan host dossiers (5-host sample per platform, 2026-06-01) rather than docs.
+
+- **Kong Admin API** (`:8001`/`:8444`) — `critical`. Three probes: JSON root
+  with `"tagline":"Welcome to Kong"` + version field (definitive); header-level
+  fallback on `Server: kong/<ver>` + `X-Kong-Admin-Latency` (present on every
+  Admin API response, unique to Kong); `/services` endpoint confirms auth-state.
+  CVE-2020-11710 (CVSS 9.8) — RCE via pre-function plugin on unauth Admin API.
+
+- **Bifrost AI Gateway** (`:8080`) — `medium`. Two probes: body contains
+  `getbifrost.ai` (footer link, confirmed via 82-hit Shodan dork) + `Server:
+  fasthttp`; title `Bifrost` fallback. Auth bypass on root path (Issue #937).
+
+- **Portkey Gateway** (`:8787`) — `medium`. Single probe: body contains `"AI
+  Gateway says hey"` (health endpoint). 0 public instances in Shodan (pure API
+  proxy, deployed behind reverse proxy). Kept for lab/internal assessment use.
+  CVE-2025-66405: SSRF via `x-portkey-custom-host` (< v1.14.0, CVSS 6.9).
+
+- **Envoy Admin** (`:9901`/`:15000`) — `critical`. Two probes: admin root with
+  title `Envoy Admin` + `Server: envoy` (lowercase, consistent across all 5
+  dossier hosts); `/config_dump` path confirms finding — returns full config
+  including plaintext upstream API keys, JWTs, and auth tokens.
+
+Note: LiteLLM (`:4000`), One API (`:3000`), NewAPI (`:3000`), sub2api already
+had fingerprints. LiteLLM title dork `http.title:"LiteLLM"` (65,976 hits) is
+FP-heavy (honeypot fleet); real population ~2,290 via `port:4000
+http.html:"litellm"`. Server: uvicorn + title "LiteLLM API - Swagger UI" is
+the accurate signature — existing `/health` json_field probe handles this.
+
 ## [v1.9.45] - 2026-05-31
 
 MCP deep enumerator (`enumMCP`). The "MCP Server" fingerprint already detected

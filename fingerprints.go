@@ -4120,6 +4120,126 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "medium",
 	},
+
+	// ── AI Gateways (Cat-32, added v1.9.46) ─────────────────────
+	{
+		// Kong Admin API (:8001) — unauth by default in docker-compose
+		// deployments (CVE-2020-11710, CVSS 9.8). The Admin API is the RCE
+		// surface: unauthenticated POST /services + POST /plugins with the
+		// pre-function plugin executes arbitrary Lua code server-side.
+		//
+		// Fingerprint derived from primary-source Shodan host dossiers
+		// (2026-06-01, 5-host sample): Server header is "kong/<version>"
+		// on every instance; X-Kong-Admin-Latency is present on every
+		// Admin API response and is unique to Kong.
+		// Body probe: GET / returns full JSON config including
+		// {"tagline":"Welcome to Kong","version":"x.y.z"}.
+		Name:         "Kong Admin API",
+		DefaultPorts: []int{8001, 8444},
+		Probes: []Probe{
+			// Primary: JSON root with tagline + version (definitive)
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: `"tagline":"Welcome to Kong"`},
+				{Type: "json_field", Field: "version"},
+			}},
+			// Fallback: header-level detection when body is not indexed
+			// X-Kong-Admin-Latency is emitted exclusively by the Admin API.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "header_contains", Field: "server", Value: "kong/"},
+				{Type: "header_contains", Field: "x-kong-admin-latency", Value: ""},
+			}},
+			// Services endpoint — confirms Admin API access (auth-state probe)
+			{Path: "/services", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "json_field", Field: "next"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// Bifrost AI Gateway (maximhq/bifrost) — Go LLM gateway.
+		// Auth bypass on root path (GitHub Issue #937): GET / returns 200
+		// even when basic auth is configured — the auth middleware only
+		// protects paths other than "/".
+		//
+		// Fingerprint from dossier (2026-06-01): Server = "fasthttp" on
+		// all 5 instances; title "Bifrost" on auth-bypassed instances;
+		// Content-Length 5690 or 2078 consistent across installs; security
+		// headers (X-Frame-Options: DENY, Content-Security-Policy:
+		// frame-ancestors 'none') present uniformly.
+		// Body contains "getbifrost.ai" (footer link — confirmed via
+		// 82-hit Shodan dork).
+		Name:         "Bifrost AI Gateway",
+		DefaultPorts: []int{8080, 443, 80},
+		Probes: []Probe{
+			// Primary: footer domain link present in body
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "getbifrost.ai"},
+				{Type: "header_contains", Field: "server", Value: "fasthttp"},
+			}},
+			// Fallback: title when body is rendered / cached
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "<title>Bifrost</title>"},
+				{Type: "header_contains", Field: "server", Value: "fasthttp"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// Portkey OSS Gateway (portkey-ai/gateway) — TypeScript LLM proxy.
+		// Auth-on-default via x-portkey-api-key header, but the health
+		// endpoint at / is unauthenticated and returns a plain-text string.
+		// CVE-2025-66405: SSRF via x-portkey-custom-host header (< v1.14.0,
+		// CVSS 6.9) allows server-side request forgery to internal services.
+		//
+		// 0 public instances found in Shodan (2026-06-01) — Portkey is
+		// primarily a hosted SaaS; self-hosted instances appear to be behind
+		// reverse proxies or VPNs. Fingerprint kept for lab/internal use.
+		Name:         "Portkey Gateway",
+		DefaultPorts: []int{8787, 443, 80},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "AI Gateway says hey"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// Envoy Admin Interface (:9901) — Envoy proxy (and Envoy AI Gateway)
+		// admin endpoint. Exposes full configuration including upstream
+		// cluster credentials via /config_dump. Unauthenticated by default;
+		// must be firewalled to loopback.
+		//
+		// Fingerprint from dossier (2026-06-01, 5-host sample): Server
+		// header is "envoy" (lowercase) on all instances; title "Envoy Admin"
+		// consistent; lowercase HTTP headers (h2-style) even on HTTP/1.1.
+		// /config_dump is the finding endpoint — returns full JSON config
+		// including plaintext API keys, JWTs, and auth tokens for all
+		// configured upstream clusters.
+		Name:         "Envoy Admin",
+		DefaultPorts: []int{9901, 15000},
+		Probes: []Probe{
+			// Primary: admin root with title and server header
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Envoy Admin"},
+				{Type: "header_contains", Field: "server", Value: "envoy"},
+			}},
+			// config_dump: the finding — accessible = all upstream credentials exposed
+			{Path: "/config_dump", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "configs"},
+				{Type: "header_contains", Field: "server", Value: "envoy"},
+			}},
+		},
+		Severity: "critical",
+	},
 }
 
 // ── Matching engine ─────────────────────────────────────────────────
