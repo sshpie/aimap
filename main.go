@@ -33,6 +33,10 @@ func main() {
 	excludeCompromised := flag.Bool("exclude-compromised", false,
 		"Drop hosts marked compromised-by-extortion (e.g. Meow-class wiped Elasticsearch with read_me index) from the JSON report. "+
 			"Use for disclosure-pipeline input — you don't want to send 'your host is exposed' to a host that's already been wiped.")
+	scanHoneypots := flag.Bool("scan-honeypots", false,
+		"Deep-enum hosts that spray open ports (the tarpit/honeypot signature) instead of skipping them. "+
+			"Default skips them: they inflate scan time (tarpitting) and emit false-critical bait findings. "+
+			"Set this to scan them anyway (e.g. to study a honeypot fleet).")
 	showVersion := flag.Bool("version", false, "Print aimap version and exit.")
 	flag.Parse()
 
@@ -152,6 +156,24 @@ func main() {
 	}
 
 	printOpenPorts(openPorts)
+
+	// ── Honeypot pre-filter ──────────────────────────────────────
+	// Real AI hosts open a few of the curated ports; honeypots spray most of
+	// them (tarpit). Skip fingerprint + deep-enum on spray hosts by default:
+	// it reclaims scan time and drops false-critical bait at the source. The
+	// skipped hosts are reported, never silently dropped.
+	if !*scanHoneypots {
+		kept, honeypots := filterHoneypotSpray(openPorts, len(portList))
+		if len(honeypots) > 0 {
+			fmt.Printf("\n  %s honeypot/tarpit pre-filter: skipped %d spray host(s) "+
+				"(>=%.0f%% of %d ports open) — use -scan-honeypots to override:\n",
+				yellow("[!]"), len(honeypots), honeypotSprayRatio*100, len(portList))
+			for _, h := range honeypots {
+				fmt.Printf("      %s\n", h)
+			}
+			openPorts = kept
+		}
+	}
 
 	if len(openPorts) == 0 {
 		fmt.Printf("\n  %s No open ports — nothing to fingerprint.\n\n", yellow("[!]"))
