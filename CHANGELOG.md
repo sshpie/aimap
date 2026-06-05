@@ -2,6 +2,45 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.51] - 2026-06-05
+
+Two new deep enumerators (One API, Argilla), neon pink banner, Cat-03 model serving
+fingerprints.
+
+### New enumerators
+
+**enumOneAPI** — `songquanpeng/one-api` LLM gateway (1.19M Docker Hub pulls)
+- `/api/status` — identity: version, system_name, email_verification flag (public by design)
+- `/v1/models` — open relay detection; 200 = anyone can route inference requests through
+  the operator's upstream provider accounts (OpenAI, Anthropic, etc.)
+- `POST /api/user/login {"username":"root","password":"123456"}` — default credential
+  check. Documented in the one-api README, actively exploited in the wild. Surfaces
+  CRITICAL with role + username on success. Verified live: 27.124.10.54:3000.
+
+**enumArgilla** — HuggingFace Argilla annotation platform
+- `/api/v1/me` — auth gate; handles both error shapes:
+  - v2.x: `{"error":"Unauthorized Access"}` (HTTP 401)
+  - v1.x: `{"detail":{"code":"argilla.api.errors::UnauthorizedError",...}}` (HTTP 401)
+  - 200 + `"username"` field = misconfigured anonymous access → CRITICAL
+- `/api/v1/workspaces` — workspace names; readable without auth = annotation training
+  data exposed → CRITICAL
+- `/api/v1/datasets` — dataset names; readable without auth → CRITICAL
+
+Both enumerators were previously falling through to `mkResult` (no-op fallback), returning
+`auth_status: unknown` and `findings: null`. agent-logging-system flagged both as
+`error_rate_high` (100% error rate, 1/1 obs). Root cause: neither was registered in
+`enumeratorRegistry`. Source: `llm-gateway-probe.py`, `datalabel-probe.py`,
+`rag-deep-probe.py`, and `VisorBishop/internal/fingerprint/argilla.go` — ported to Go
+with live endpoint verification before writing.
+
+### Other changes
+- **Banner**: color changed from cyan (`\033[96m`) to neon pink (`\033[38;5;198m`)
+- **Cat-03 model serving fingerprints**: KoboldCpp (port 5001), LM Studio (port 1234),
+  Aphrodite Engine (port 2242, `pygmalionai` owned_by anchor), LMDeploy, GPT4All,
+  HuggingFace TGI, faster-whisper server
+- **README**: banner image, screenshots section (6 images: fingerprinting, phase 3,
+  service cards, Ollama CRIT, One API default creds, full summary)
+
 ## [v1.9.50] - 2026-06-05
 
 Complete the per-item enum parallelization (v1.9.49 did Qdrant/Chroma/Weaviate):
