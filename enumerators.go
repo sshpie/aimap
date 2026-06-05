@@ -102,7 +102,11 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"MLflow": enumMLflow,
 
 	// LLM proxy / gateway
-	"LiteLLM": enumLiteLLM,
+	"LiteLLM":  enumLiteLLM,
+	"One API":  enumOneAPI,
+
+	// Data labeling / annotation
+	"Argilla": enumArgilla,
 
 	// Orchestration / UI
 	"Flowise":     enumFlowise,
@@ -5786,6 +5790,177 @@ func enumLiteLLM(c *http.Client, svc ServiceMatch) EnumResult {
 
 	if r.AuthStatus == "unknown" {
 		r.AuthStatus = "on"
+	}
+
+	return r
+}
+
+// ── One API ─────────────────────────────────────────────────────────
+
+func enumOneAPI(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// /api/status is public by design — confirms identity and exposes config flags.
+	// Capture version and system_name from the match body already populated.
+	if st, _, body, err := httpGET(c, b+"/api/status"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if data := jMap(m, "data"); data != nil {
+				if v := jStr(data, "version"); v != "" {
+					r.Version = v
+				}
+				if sn := jStr(data, "system_name"); sn != "" {
+					r.Details = append(r.Details, fmt.Sprintf("System name: %s", sn))
+				}
+				if ev, ok := data["email_verification"].(bool); ok && !ev {
+					r.Details = append(r.Details, "email_verification: disabled")
+				}
+			}
+		}
+	}
+
+	// /v1/models — OpenAI-compat endpoint; 401 = auth enforced, 200 = open relay.
+	if st, _, body, err := httpGET(c, b+"/v1/models"); err == nil {
+		if st == 200 {
+			r.AuthStatus = "none"
+			if m, err := parseJSON(body); err == nil {
+				models := jArray(m, "data")
+				var modelNames []string
+				for _, entry := range models {
+					if em, ok := entry.(map[string]interface{}); ok {
+						if id := jStr(em, "id"); id != "" {
+							modelNames = append(modelNames, id)
+						}
+					}
+				}
+				if len(modelNames) > 0 {
+					r.Details = append(r.Details, fmt.Sprintf("Models: %d (%s)", len(modelNames), strings.Join(modelNames, ", ")))
+					r.RawData["models"] = modelNames
+					r.Findings = append(r.Findings, Finding{
+						Category: "access",
+						Title:    fmt.Sprintf("Open relay — %d model(s) accessible without auth", len(modelNames)),
+						Detail:   "Anyone can route inference requests through this gateway, billing charges to the operator's upstream provider accounts.",
+						Severity: "critical",
+					})
+				}
+			}
+		} else if st == 401 || st == 403 {
+			r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+		}
+	}
+
+	// Default credential check: root / 123456 — documented in the one-api README,
+	// actively exploited in the wild (1.19M Docker Hub pulls). Admin login = full
+	// read of all configured upstream API keys + usage logs.
+	payload := []byte(`{"username":"root","password":"123456"}`)
+	if st, _, body, err := httpPOST(c, b+"/api/user/login", "application/json", payload); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			if success, ok := m["success"].(bool); ok && success {
+				r.AuthStatus = "none (default creds active)"
+				if data := jMap(m, "data"); data != nil {
+					role := jStr(data, "role")
+					username := jStr(data, "username")
+					r.RawData["default_cred_login"] = map[string]string{
+						"username": username,
+						"role":     role,
+					}
+				}
+				r.Findings = append(r.Findings, Finding{
+					Category: "credentials",
+					Title:    "Default credentials active — root / 123456",
+					Detail:   "Full admin access: read all upstream provider API keys, add/remove channels, view all usage logs and user quotas. Exploitation confirmed in the wild.",
+					Severity: "critical",
+				})
+			}
+		}
+	}
+
+	return r
+}
+
+// ── Argilla ─────────────────────────────────────────────────────────
+
+func enumArgilla(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// /api/v1/me — the canonical auth gate. Returns 401 on all secured v2 instances.
+	// Two error shapes exist across versions:
+	//   v2.x: {"error":"Unauthorized Access"} (HTTP 401)
+	//   v1.x: {"detail":{"code":"argilla.api.errors::UnauthorizedError",...}} (HTTP 401)
+	// A 200 with "username" in body = misconfigured anonymous access (CRITICAL).
+	if st, _, body, err := httpGET(c, b+"/api/v1/me"); err == nil {
+		bodyStr := string(body)
+		if st == 200 && strings.Contains(bodyStr, `"username"`) {
+			r.AuthStatus = "none"
+			r.Findings = append(r.Findings, Finding{
+				Category: "access",
+				Title:    "Unauthenticated access to /api/v1/me — user info exposed",
+				Detail:   "The /api/v1/me endpoint returned user data without credentials. Argilla is misconfigured for anonymous access.",
+				Severity: "critical",
+			})
+		} else if st == 401 &&
+			(strings.Contains(bodyStr, "Unauthorized Access") ||
+				strings.Contains(bodyStr, "argilla.api.errors::UnauthorizedError")) {
+			r.AuthStatus = "required (HTTP 401)"
+		}
+	}
+
+	// /api/v1/workspaces — data layer; readable without auth = annotation data exposed.
+	if st, _, body, err := httpGET(c, b+"/api/v1/workspaces"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			items := jArray(m, "items")
+			if items == nil {
+				// flat array response
+				if arr, err := parseJSONArray(body); err == nil {
+					items = arr
+				}
+			}
+			if len(items) > 0 {
+				r.AuthStatus = "none"
+				var names []string
+				for _, item := range items {
+					if im, ok := item.(map[string]interface{}); ok {
+						if n := jStr(im, "name"); n != "" {
+							names = append(names, n)
+						}
+					}
+				}
+				r.RawData["workspaces"] = names
+				r.Findings = append(r.Findings, Finding{
+					Category: "data",
+					Title:    fmt.Sprintf("%d workspace(s) readable without auth", len(items)),
+					Detail:   fmt.Sprintf("Workspace names: %s. Argilla workspaces contain annotation datasets used for LLM fine-tuning — exposure leaks training data labels and potentially PII.", strings.Join(names, ", ")),
+					Severity: "critical",
+				})
+			}
+		}
+	}
+
+	// /api/v1/datasets — annotation datasets; names are the finding.
+	if st, _, body, err := httpGET(c, b+"/api/v1/datasets"); err == nil && st == 200 {
+		if m, err := parseJSON(body); err == nil {
+			items := jArray(m, "items")
+			if len(items) > 0 {
+				var names []string
+				for _, item := range items {
+					if im, ok := item.(map[string]interface{}); ok {
+						if n := jStr(im, "name"); n != "" {
+							names = append(names, n)
+						}
+					}
+				}
+				r.RawData["datasets"] = names
+				r.Findings = append(r.Findings, Finding{
+					Category: "data",
+					Title:    fmt.Sprintf("%d annotation dataset(s) readable without auth", len(items)),
+					Detail:   fmt.Sprintf("Dataset names: %s", strings.Join(names, ", ")),
+					Severity: "critical",
+				})
+			}
+		}
 	}
 
 	return r

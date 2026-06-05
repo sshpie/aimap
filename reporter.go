@@ -71,7 +71,7 @@ var asciiBanner = `
   ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝`
 
 func printBanner() {
-	fmt.Println(cyan(asciiBanner))
+	fmt.Println(pink(asciiBanner))
 	fmt.Println(dim("  AI Infrastructure Mapper v" + Version))
 	fmt.Println(dim("  by NuClide"))
 }

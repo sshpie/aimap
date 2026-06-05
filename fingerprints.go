@@ -293,6 +293,134 @@ var Fingerprints = []Fingerprint{
 		Severity: "medium",
 	},
 
+	// ── OpenAI-compat inference servers (Cat-03, 2026-06-05) ────
+	// KoboldCpp — local LLM inference server, port 5001 (KoboldCpp-exclusive).
+	// GET /api/extra/version returns the capabilities dict with a literal
+	// "KoboldCpp" string in the result field — zero FP, unique across all
+	// AI/ML servers. Optional --password flag only gates generation endpoints;
+	// /api/extra/version is always unauthenticated. Auth tier A*.
+	{
+		Name:         "KoboldCpp",
+		DefaultPorts: []int{5001, 5000, 8000},
+		Probes: []Probe{
+			{Path: "/api/extra/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: `"result":"KoboldCpp"`},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// LM Studio — desktop LLM app exposing OpenAI-compat server on port 1234
+	// (LM Studio-exclusive default). Native REST API at /api/v1/ prefix is
+	// LM Studio-exclusive; /api/v1/models/load and /api/v1/models/download
+	// allow unauth model management including HuggingFace downloads when no
+	// API token is configured. Auth tier A*.
+	{
+		Name:         "LM Studio",
+		DefaultPorts: []int{1234, 8080, 80},
+		Probes: []Probe{
+			{Path: "/api/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Aphrodite Engine — vLLM fork for creative/RP workloads (PygmalionAI).
+	// Default port 2242 (Aphrodite-exclusive). owned_by:"pygmalionai" in
+	// /v1/models is hardcoded in protocol.py 0.6.4+ — unique across all
+	// OpenAI-compat servers. Do NOT use body_contains:"aphrodite" alone —
+	// bare "aphrodite" matches 362 Shodan Greek-mythology noise results.
+	{
+		Name:         "Aphrodite Engine",
+		DefaultPorts: []int{2242, 8000, 7860},
+		Probes: []Probe{
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "pygmalionai"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// LMDeploy — InternLM/Shanghai AI Lab serving engine. Port 23333 is
+	// LMDeploy-exclusive. owned_by:"lmdeploy" in /v1/models; /update_weights
+	// allows unauth model weight updates; /terminate allows unauth server
+	// shutdown; /distserve/* exposes distributed serving topology. Auth tier A*.
+	{
+		Name:         "LMDeploy",
+		DefaultPorts: []int{23333, 8000, 80},
+		Probes: []Probe{
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "lmdeploy"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// GPT4All — local LLM desktop app (Nomic AI), port 4891 (exclusive).
+	// owned_by:"humanity" is hardcoded in server.cpp — unique across all
+	// OpenAI-compat servers. Server is off by default (serverChat=false);
+	// only fires on unauth-enabled instances. Auth tier A*.
+	{
+		Name:         "GPT4All",
+		DefaultPorts: []int{4891},
+		Probes: []Probe{
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "humanity"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// HuggingFace TGI (Text Generation Inference) — LLM inference server,
+	// maintenance mode as of 2026. Docker -p 8080:80 is the canonical mapping.
+	// GET /info returns tokenization_workers + model_sha — absent from all
+	// other serving platforms. model_id reveals private/gated HF models.
+	// Auth tier A (no auth mechanism; Shodan-dark via JSON-body dorks).
+	{
+		Name:         "HuggingFace TGI",
+		DefaultPorts: []int{8080, 80, 3000},
+		Probes: []Probe{
+			{Path: "/info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "model_id"},
+				{Type: "body_contains", Value: "tokenization_workers"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// faster-whisper server (speaches / faster-whisper-server) — OpenAI-compat
+	// ASR API. GET /v1/models returns model IDs with "Systran/" prefix
+	// (e.g. Systran/faster-distil-whisper-large-v3), distinguishing from
+	// openai-whisper-asr-webservice (openai/whisper-*) and whisper.cpp.
+	// linuxserver/faster-whisper uses port 10300. Auth tier A.
+	{
+		Name:         "faster-whisper server",
+		DefaultPorts: []int{8000, 10300, 8080},
+		Probes: []Probe{
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "Systran"},
+			}},
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "faster-whisper"},
+			}},
+		},
+		Severity: "low",
+	},
+
 	// ── LLM safety / guardrail ──────────────────────────────────
 	// LLM Guard (Protect AI) scanner API. Field-validated 2026-05-29 on
 	// 5.78.101.230:8000. GET / returns {"name":"LLM Guard API"} unauth.

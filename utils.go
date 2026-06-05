@@ -19,6 +19,7 @@ const (
 	cGreen    = "\033[92m"
 	cYellow   = "\033[93m"
 	cBlue     = "\033[94m"
+	cPink     = "\033[38;5;198m"
 	cCyan     = "\033[96m"
 	cWhite    = "\033[97m"
 	cBold     = "\033[1m"
@@ -33,6 +34,7 @@ func red(s string) string    { return cRed + s + cReset }
 func green(s string) string  { return cGreen + s + cReset }
 func yellow(s string) string { return cYellow + s + cReset }
 func blue(s string) string   { return cBlue + s + cReset }
+func pink(s string) string   { return cPink + s + cReset }
 func cyan(s string) string   { return cCyan + s + cReset }
 func bold(s string) string   { return cBold + s + cReset }
 func dim(s string) string    { return cDim + s + cReset }
