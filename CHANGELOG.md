@@ -2,6 +2,43 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.48] - 2026-06-05
+
+Cat-02 wave-2 GAP fingerprints — 9 new, scaffolded from `tome probe` configs, closing the
+aimap blindness to vendors that were in tome/registry but not in the engine. 9 tests (real-shape
+passes / FP-shape refutes), full suite green.
+
+- **SurrealDB** (8000) `/version`→`surrealdb-`; **Infinity/InfiniFlow** (23820) `/databases`→json
+  error_code+databases; **Databend** (8000) `/v1/health`→databend; **GreptimeDB** (4000)
+  `/v1/sql`→records+schema; **Apache Solr** (8983) `/solr/admin/info/system`→solr-spec-version;
+  **Couchbase** (8091) `/pools`→implementationVersion; **Neo4j** (7474) `/`→neo4j_version;
+  **OceanBase** (2886) `/api/v1/status`→OceanBase (CANDIDATE); **Epsilla** (8888) statusCode quirk (FIELD-UNVALIDATED).
+- **Deferred (NOT buildable as HTTP fingerprints):** MongoDB (27017) + Cassandra (9042) — binary wire
+  protocols (Mongo hello/buildInfo, CQL SUPPORTED); need a Go protocol enumerator, not a probe config.
+
+## [v1.9.47] - 2026-06-04
+
+Cat-02 Vector Database virgin re-birth — Stage -1 OSINT fed 2 new fingerprints +
+3 strengthen/tighten passes. 9 new tests (real-shape passes, FP-shape refutes).
+
+- **Marqo** (`:8882`) — `high`. New (no nuclei template existed). Root probe on the
+  exact hardcoded `"Welcome to Marqo"` string (VERY LOW FP) + `/indexes` JSON
+  enumeration surface. Doc-grounded, field-UNVALIDATED (Shodan-dark on the web UI;
+  confirm via Censys/active).
+- **Manticore Search** (`:9308`/`:9306`) — `high`. New (no template). Header-anchored
+  on `X-Powered-By: Manticore Search` (the 3-key JSON body shape alone is not unique;
+  the header is the anchor). No-auth-by-design product. Doc-grounded, field-UNVALIDATED.
+- **Typesense** (`:8108`) — TIGHTENED. The prior `/health` → `{"ok":true}`-only probe
+  was the exact naked-generic-body FP class; added a conjunctive `Server: Typesense`
+  header anchor so generic `{"ok":true}` health endpoints no longer false-match.
+- **Vespa** (`:19071`) — STRENGTHENED. Added an `/ApplicationStatus` probe on the
+  `com.yahoo.vespa` Java namespace (exclusive marker; matched 38 Shodan hosts).
+- **Meilisearch** (`:7700`) — STRENGTHENED. Added a `/version` probe on the
+  `X-Meilisearch-Version` header, which fires even when a master key gates the body.
+
+Deferred (next 0d pass): Chroma Python-FastAPI-vs-Rust-server discriminator for
+CVE-2026-45829 scoping — belongs in the enumerator/severity layer, not identity.
+
 ## [v1.9.46] - 2026-06-01
 
 4 new AI Gateway fingerprints (Cat-32 survey). All derived from primary-source

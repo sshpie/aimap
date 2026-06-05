@@ -88,6 +88,147 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "high",
 	},
+	// Marqo — added Cat-02 virgin re-birth 2026-06-04 (no nuclei template existed).
+	// Root returns {"message":"Welcome to Marqo",...} — exact hardcoded string, VERY LOW FP.
+	// /indexes is the unauth enumeration surface (index names). Doc-grounded; field-UNVALIDATED
+	// (0 Shodan hits via http.html on the Freelancer web UI — route via Censys/active to confirm).
+	{
+		Name:         "Marqo",
+		DefaultPorts: []int{8882, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Welcome to Marqo"},
+			}},
+			{Path: "/indexes", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "results"},
+			}},
+		},
+		Severity: "high",
+	},
+	// Manticore Search — added Cat-02 virgin re-birth 2026-06-04 (no nuclei template existed).
+	// No auth layer exists in the product (Manticore ships zero authentication). Recent versions
+	// emit `X-Powered-By: Manticore Search` on the HTTP JSON API (9308) — header-anchored, unique.
+	// Doc-grounded; field-UNVALIDATED (0 Shodan hits — confirm via active 9308/9306 sweep).
+	{
+		Name:         "Manticore Search",
+		DefaultPorts: []int{9308, 9306},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "header_contains", Field: "X-Powered-By", Value: "Manticore"},
+			}},
+		},
+		Severity: "high", // no-auth-by-design + full SQL over HTTP
+	},
+
+	// ── Cat-02 wave-2 gap fingerprints (2026-06-05; scaffolded from `tome probe`) ──
+	// MongoDB (27017) and Cassandra (9042) intentionally NOT here — binary wire protocols
+	// (Mongo hello/buildInfo, CQL SUPPORTED) that the HTTP matcher cannot speak; need a Go enumerator.
+	{
+		Name:         "SurrealDB",
+		DefaultPorts: []int{8000, 8080},
+		Probes: []Probe{
+			{Path: "/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "surrealdb-"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name:         "Infinity", // InfiniFlow vector DB (NOT michaelfeil infinity-embedding)
+		DefaultPorts: []int{23820},
+		Probes: []Probe{
+			{Path: "/databases", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "error_code"},
+				{Type: "json_field", Field: "databases"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name:         "Databend",
+		DefaultPorts: []int{8000, 8124},
+		Probes: []Probe{
+			{Path: "/v1/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "databend"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name:         "GreptimeDB",
+		DefaultPorts: []int{4000},
+		Probes: []Probe{
+			{Path: "/v1/sql?sql=SELECT+1", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "records"},
+				{Type: "body_contains", Value: "schema"},
+			}},
+		},
+		Severity: "high",
+	},
+	// Epsilla — body quirk: lowercase "statusCode":200. Path may require POST; FIELD-UNVALIDATED.
+	{
+		Name:         "Epsilla",
+		DefaultPorts: []int{8888},
+		Probes: []Probe{
+			{Path: "/api/default/load", Matches: []MatchCond{
+				{Type: "body_contains", Value: `"statusCode":200`},
+				{Type: "body_contains", Value: `"message"`},
+				{Type: "body_contains", Value: `"result"`},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name:         "Apache Solr",
+		DefaultPorts: []int{8983, 8984},
+		Probes: []Probe{
+			{Path: "/solr/admin/info/system", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "solr-spec-version"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name:         "Couchbase",
+		DefaultPorts: []int{8091},
+		Probes: []Probe{
+			{Path: "/pools", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "implementationVersion"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		Name:         "Neo4j", // :7474/ discovery JSON, readable unauth even when Bolt is gated
+		DefaultPorts: []int{7474},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "neo4j_version"},
+			}},
+		},
+		Severity: "medium",
+	},
+	// OceanBase — obshell HTTP on 2886; 2881 is MySQL-wire (won't HTTP-match). CANDIDATE / FIELD-UNVALIDATED.
+	{
+		Name:         "OceanBase",
+		DefaultPorts: []int{2886, 2881},
+		Probes: []Probe{
+			{Path: "/api/v1/status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "OceanBase"},
+			}},
+		},
+		Severity: "medium",
+	},
 
 	// ── LLM runtimes ───────────────────────────────────────────
 	{
@@ -877,6 +1018,12 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: `"status":"available"`},
 			}},
+			// X-Meilisearch-Version header is emitted on every response and is exclusive to
+			// Meilisearch — fires even when a master key is set and /health body is gated.
+			// Strengthened Cat-02 virgin 2026-06-04.
+			{Path: "/version", Matches: []MatchCond{
+				{Type: "header_contains", Field: "X-Meilisearch-Version", Value: ""},
+			}},
 		},
 		Severity: "high",
 	},
@@ -884,9 +1031,13 @@ var Fingerprints = []Fingerprint{
 		Name:         "Typesense",
 		DefaultPorts: []int{8108, 80, 443},
 		Probes: []Probe{
+			// TIGHTENED Cat-02 virgin 2026-06-04: `{"ok":true}` alone is a generic health-shape
+			// (the exact naked-body FP class the methodology warns against). Anchor to the
+			// Server: Typesense/x header, which Typesense emits on every response.
 			{Path: "/health", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: `"ok":true`},
+				{Type: "header_contains", Field: "Server", Value: "Typesense"},
 			}},
 		},
 		Severity: "medium", // Tier-C confirmed (0/9837 unauth in field survey)
@@ -898,6 +1049,13 @@ var Fingerprints = []Fingerprint{
 			{Path: "/state/v1", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "config-server"},
+			}},
+			// /ApplicationStatus on the config server (19071) leaks the com.yahoo.vespa Java
+			// namespace — exclusive to Vespa, matched 38 hosts on Shodan (bare-string dork).
+			// Strengthened Cat-02 virgin 2026-06-04.
+			{Path: "/ApplicationStatus", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "com.yahoo.vespa"},
 			}},
 		},
 		Severity: "medium",
@@ -4239,6 +4397,230 @@ var Fingerprints = []Fingerprint{
 			}},
 		},
 		Severity: "critical",
+	},
+
+	// ── LLM Orchestration platforms (added v1.9.47) ───────────────────────
+	// 11 platforms that were previously undetected. All probes conjunctive
+	// (status_code + platform-specific body/json marker minimum). Anti-FP
+	// discipline applied throughout; see inline comments for FP rationale.
+
+	{
+		// Langflow — LangChain visual agent builder. Default port 7860 (Gradio/
+		// uvicorn). The {status, chat, db} triple on /api/v1/health_check is
+		// Langflow-exclusive (confirmed in langflow source: health_check returns
+		// exactly this three-key structure). DO NOT match on http.title:"Langflow"
+		// — the Shodan dork returns ~96k hits almost entirely from a marketing-
+		// site farm (false positive ratio near 100%). API body probes only.
+		Name:         "Langflow",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			// Three-key health_check body — Langflow-exclusive triple
+			{Path: "/api/v1/health_check", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "chat"},
+				{Type: "body_contains", Value: "db"},
+				{Type: "body_contains", Value: "status"},
+			}},
+			// /api/v1/config returns JSON containing langflow_version field
+			{Path: "/api/v1/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "langflow_version"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// LibreChat — open-source multi-LLM chat platform. Default port 3080.
+		// GET /api/config returns registration/social-login config unauth.
+		// The {registration, socialLogins} pair is LibreChat-specific — not
+		// present in any other chat-platform /api/config shape.
+		Name:         "LibreChat",
+		DefaultPorts: []int{3080, 3000, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "registration"},
+				{Type: "body_contains", Value: "socialLogins"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// LobeChat — modern LLM chat UI. Default port 3210. Two probe
+		// alternates covering the global-config API and the HTML root.
+		Name:         "LobeChat",
+		DefaultPorts: []int{3210, 3000, 80, 443},
+		Probes: []Probe{
+			// /api/config/global returns oAuthSSOProviders in the config blob // VERIFY
+			{Path: "/api/config/global", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "oAuthSSOProviders"},
+			}},
+			// HTML root — dual brand markers (title + asset path) // VERIFY second marker
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "LobeChat"},
+				{Type: "body_contains", Value: "lobe"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// big-AGI — open-source GPT-4 UI. Default port 3000.
+		// tRPC backend.listCapabilities endpoint exposes model/capability list.
+		// The {capabilities, llms} pair is big-AGI-specific. // VERIFY
+		Name:         "big-AGI",
+		DefaultPorts: []int{3000, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/trpc/backend.listCapabilities?batch=1&input={}", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "capabilities"},
+				{Type: "body_contains", Value: "llms"},
+			}},
+		},
+		Severity: "high", // VERIFY against live instance
+	},
+	{
+		// FastGPT — RAG+knowledge-base LLM platform (Sealos/labring). Default
+		// port 3000. Two probes: (A) presence-gated data-layer 401 with the
+		// FastGPT-specific "unAuthorization" token; (B) login page identity anchor.
+		Name:         "FastGPT",
+		DefaultPorts: []int{3000, 443},
+		Probes: []Probe{
+			// Auth-gated data-layer probe — present-gated (401 confirms identity)
+			{Path: "/api/v1/core/dataset/list", Matches: []MatchCond{
+				{Type: "status_code", Value: "401"},
+				{Type: "body_contains", Value: "unAuthorization"},
+			}},
+			// Login page dual-brand anchor
+			{Path: "/login", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "fastgpt"},
+				{Type: "body_contains", Value: "FastGPT"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Coze Studio — ByteDance open-source agent builder. Default port 8888.
+		// Root page carries both the display name ("Coze Studio") and the
+		// internal JS bundle slug ("coze-studio") — the pair is distinctive.
+		Name:         "Coze Studio",
+		DefaultPorts: []int{8888, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Coze Studio"},
+				{Type: "body_contains", Value: "coze-studio"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// BISHENG — DataElem enterprise document-intelligence platform.
+		// Default ports: 3001 (frontend), 7860 (backend Gradio/FastAPI).
+		// Two probes: root HTML (brand + vendor slug) and /docs openapi.
+		Name:         "BISHENG",
+		DefaultPorts: []int{3001, 7860, 443},
+		Probes: []Probe{
+			// Root SPA — brand name + DataElem vendor slug // VERIFY title-case
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "bisheng"},
+				{Type: "body_contains", Value: "dataelement"},
+			}},
+			// /docs OpenAPI spec on the backend port
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "openapi"},
+				{Type: "body_contains", Value: "bisheng"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Chainlit — Python LLM app framework (FRAMEWORK: title is dev-set,
+		// NEVER match on <title>). Two structural probes: /auth/config
+		// (always served, contains requireLogin/passwordAuth) and the S3 CDN
+		// asset path that is hardcoded in every Chainlit deployment.
+		Name:         "Chainlit",
+		DefaultPorts: []int{8000, 80, 443},
+		Probes: []Probe{
+			// Auth-config endpoint — always present, contains auth-state flags
+			{Path: "/auth/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "requireLogin"},
+				{Type: "body_contains", Value: "passwordAuth"},
+			}},
+			// Hardcoded CDN asset path in every Chainlit bundle
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "chainlit-cloud.s3.eu-west-3.amazonaws.com"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Cheshire Cat — Italian OSS LLM framework. Default port 1865
+		// (the "cat port" — near-unique). CRITICAL: unauth /plugins/upload
+		// accepts arbitrary plugin ZIPs = unauthenticated code execution on
+		// the server. Two probes: OpenAPI spec title and Swagger docs body.
+		Name:         "Cheshire Cat",
+		DefaultPorts: []int{1865, 80, 443},
+		Probes: []Probe{
+			// OpenAPI title confirms identity // VERIFY exact OpenAPI title
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Cheshire Cat"},
+			}},
+			// /docs Swagger page carries the slug
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "cheshire-cat"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// Khoj — open-source personal AI assistant. Default port 42110
+		// (Khoj-exclusive). Anonymous mode is the default. Two probes:
+		// Django admin panel with khoj marker; root page brand.
+		Name:         "Khoj",
+		DefaultPorts: []int{42110, 80, 443},
+		Probes: []Probe{
+			// Django admin page — Django administration + khoj marker // VERIFY khoj marker on admin page
+			{Path: "/server/admin/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Django administration"},
+				{Type: "body_contains", Value: "khoj"},
+			}},
+			// Root page carries brand string
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "khoj"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// h2oGPT — H2O.ai open-source LLM chat + RAG. Default ports 7860
+		// (Gradio), 5000/5001 (OpenAI-compat API). Two probes: Gradio OpenAPI
+		// spec with h2oGPT-unique function name; OpenAI-compat /models endpoint.
+		Name:         "h2oGPT",
+		DefaultPorts: []int{7860, 5000, 5001},
+		Probes: []Probe{
+			// Gradio OpenAPI spec contains h2oGPT-specific function name
+			{Path: "/gradio_api/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "submit_nochat_plain_api"},
+			}},
+			// OpenAI-compat /models endpoint
+			{Path: "/openai_api/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+			}},
+		},
+		Severity: "medium",
 	},
 }
 
