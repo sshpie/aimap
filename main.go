@@ -45,6 +45,8 @@ func main() {
 		os.Exit(0)
 	}
 
+	initFetchCache() // no-op unless AIMAP_FETCH_CACHE=1 (per-run GET dedup across all phases)
+
 	// -ports-class overrides -ports. Resolved early so the rest of the
 	// pipeline sees a single canonical port list.
 	if *portsClass != "" {
@@ -112,6 +114,14 @@ func main() {
 
 	// ── Banner ───────────────────────────────────────────────────
 	printBanner()
+
+	// Fast path: pipelined orchestration (AIMAP_PIPELINE=1). Self-contained — runs
+	// scan+fingerprint+enum per host in a flat pool with no phase barriers, then returns.
+	// Default (below) is the unchanged 3-phase engine.
+	if pipelineOn {
+		runPipeline(*target, hosts, targets, portList, *timeout, *threads, *verbose, *output, startTime, *scanHoneypots)
+		return
+	}
 
 	// ── Phase 1: Port Scan ───────────────────────────────────────
 	printPhase(1, "PORT DISCOVERY")
@@ -204,6 +214,11 @@ func main() {
 	printPhase(3, "DEEP ENUMERATION")
 
 	enumResults := runEnumerators(services, *timeout, *verbose, *threads)
+
+	if fetchCacheOn && fetchCache != nil {
+		f, h := fetchCache.Stats()
+		fmt.Printf("\n  [fetch-cache] real fetches: %d | cache hits (deduped): %d | saved %.0f%%\n", f, h, 100*float64(h)/float64(f+h+1))
+	}
 
 	// ── Extortion filter (v1.9.9) ────────────────────────────────
 	// --exclude-compromised drops hosts that aimap classified as

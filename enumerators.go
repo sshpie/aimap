@@ -273,20 +273,19 @@ func enumWeaviate(c *http.Client, svc ServiceMatch) EnumResult {
 				Objects    int      `json:"objects"`
 				PII        []string `json:"pii_fields,omitempty"`
 			}
-			var cols []colInfo
 			var allPII []string
 			totalObjects := 0
-
 			r.Details = append(r.Details, fmt.Sprintf("Collections: %d", len(classes)))
-			for _, cls := range classes {
+
+			// schema fields (incl. PII) built sequentially (no fetch); per-class object-count
+			// fetch runs CONCURRENTLY (bounded) — was the serial enum bottleneck.
+			slots := make([]colInfo, len(classes))
+			for i, cls := range classes {
 				cm, ok := cls.(map[string]interface{})
 				if !ok {
 					continue
 				}
-				ci := colInfo{
-					Name:       jStr(cm, "class"),
-					Vectorizer: jStr(cm, "vectorizer"),
-				}
+				ci := colInfo{Name: jStr(cm, "class"), Vectorizer: jStr(cm, "vectorizer")}
 				props := jArray(cm, "properties")
 				ci.Props = len(props)
 				for _, p := range props {
@@ -299,11 +298,23 @@ func enumWeaviate(c *http.Client, svc ServiceMatch) EnumResult {
 						allPII = append(allPII, pName)
 					}
 				}
-				url := fmt.Sprintf("%s/v1/objects?class=%s&limit=1", b, ci.Name)
+				slots[i] = ci
+			}
+			fanout(len(slots), enumItemConcurrency, func(i int) {
+				if slots[i].Name == "" {
+					return
+				}
+				url := fmt.Sprintf("%s/v1/objects?class=%s&limit=1", b, slots[i].Name)
 				if s, _, ob, e := httpGET(c, url); e == nil && s == 200 {
 					if om, e := parseJSON(ob); e == nil {
-						ci.Objects = int(jFloat(om, "totalResults"))
+						slots[i].Objects = int(jFloat(om, "totalResults"))
 					}
+				}
+			})
+			var cols []colInfo
+			for _, ci := range slots {
+				if ci.Name == "" {
+					continue
 				}
 				totalObjects += ci.Objects
 				r.Details = append(r.Details, fmt.Sprintf("  %-30s (%s objects)", ci.Name, fmtNum(ci.Objects)))
@@ -506,30 +517,41 @@ func enumChromaDB(c *http.Client, svc ServiceMatch) EnumResult {
 				ID    string `json:"id"`
 				Count int    `json:"count"`
 			}
-			var cols []colInfo
 			totalObjects := 0
 			var piiNames []string
-
 			r.Details = append(r.Details, fmt.Sprintf("Collections: %d", len(arr)))
-			for _, item := range arr {
+
+			// names/IDs from the list (no fetch); per-collection /count fetches run CONCURRENTLY
+			// (bounded) — was serial, the enum bottleneck on hundred-collection hosts.
+			slots := make([]colInfo, len(arr))
+			for i, item := range arr {
 				if cm, ok := item.(map[string]interface{}); ok {
-					ci := colInfo{Name: jStr(cm, "name"), ID: jStr(cm, "id")}
-					if ci.ID != "" {
-						cURL := fmt.Sprintf("%s/api/v1/collections/%s/count", b, ci.ID)
-						if s, _, cb, e := httpGET(c, cURL); e == nil && s == 200 {
-							var cnt int
-							if json.Unmarshal(cb, &cnt) == nil {
-								ci.Count = cnt
-							}
-						}
-					}
-					totalObjects += ci.Count
-					if isPII(ci.Name) {
-						piiNames = append(piiNames, ci.Name)
-					}
-					r.Details = append(r.Details, fmt.Sprintf("  %-30s (%s objects)", ci.Name, fmtNum(ci.Count)))
-					cols = append(cols, ci)
+					slots[i] = colInfo{Name: jStr(cm, "name"), ID: jStr(cm, "id")}
 				}
+			}
+			fanout(len(slots), enumItemConcurrency, func(i int) {
+				if slots[i].ID == "" {
+					return
+				}
+				cURL := fmt.Sprintf("%s/api/v1/collections/%s/count", b, slots[i].ID)
+				if s, _, cb, e := httpGET(c, cURL); e == nil && s == 200 {
+					var cnt int
+					if json.Unmarshal(cb, &cnt) == nil {
+						slots[i].Count = cnt
+					}
+				}
+			})
+			var cols []colInfo
+			for _, ci := range slots {
+				if ci.Name == "" {
+					continue
+				}
+				totalObjects += ci.Count
+				if isPII(ci.Name) {
+					piiNames = append(piiNames, ci.Name)
+				}
+				r.Details = append(r.Details, fmt.Sprintf("  %-30s (%s objects)", ci.Name, fmtNum(ci.Count)))
+				cols = append(cols, ci)
 			}
 			r.RawData["collections"] = cols
 
@@ -568,22 +590,42 @@ func enumQdrant(c *http.Client, svc ServiceMatch) EnumResult {
 					Points int    `json:"points"`
 					Status string `json:"status"`
 				}
-				var details []colDetail
 				r.Details = append(r.Details, fmt.Sprintf("Collections: %d", len(cols)))
-				for _, col := range cols {
+				// Per-collection points_count fetches run CONCURRENTLY (bounded pool) instead of
+				// sequentially — this loop was the enum bottleneck (a 600-collection host fired 600
+				// serial requests = minutes). Each goroutine writes its own slot, so no lock; the
+				// slice is pre-sized and aggregated after Wait. Order preserved.
+				slots := make([]colDetail, len(cols))
+				var cwg sync.WaitGroup
+				cpool := newPool(enumItemConcurrency)
+				for i, col := range cols {
 					cm, ok := col.(map[string]interface{})
 					if !ok {
 						continue
 					}
-					cd := colDetail{Name: jStr(cm, "name")}
-					cURL := fmt.Sprintf("%s/collections/%s", b, cd.Name)
-					if s, _, cb, e := httpGET(c, cURL); e == nil && s == 200 {
-						if dm, err := parseJSON(cb); err == nil {
-							if res := jMap(dm, "result"); res != nil {
-								cd.Points = int(jFloat(res, "points_count"))
-								cd.Status = jStr(res, "status")
+					name := jStr(cm, "name")
+					slots[i].Name = name
+					cwg.Add(1)
+					cpool.Acquire()
+					go func(idx int, nm string) {
+						defer cwg.Done()
+						defer cpool.Release()
+						cURL := fmt.Sprintf("%s/collections/%s", b, nm)
+						if s, _, cb, e := httpGET(c, cURL); e == nil && s == 200 {
+							if dm, err := parseJSON(cb); err == nil {
+								if res := jMap(dm, "result"); res != nil {
+									slots[idx].Points = int(jFloat(res, "points_count"))
+									slots[idx].Status = jStr(res, "status")
+								}
 							}
 						}
+					}(i, name)
+				}
+				cwg.Wait()
+				var details []colDetail
+				for _, cd := range slots {
+					if cd.Name == "" {
+						continue
 					}
 					r.Details = append(r.Details, fmt.Sprintf("  %-30s (%s points)", cd.Name, fmtNum(cd.Points)))
 					details = append(details, cd)

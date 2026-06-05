@@ -2,6 +2,26 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.49] - 2026-06-05
+
+Enum speed — parallelize per-item enumerator loops (the real bottleneck). The deep
+enumerators fetched per-collection / per-class counts SEQUENTIALLY; a 600-collection
+Qdrant host fired 600 serial requests = minutes on a single goroutine, which no amount
+of host-level concurrency could help. Now bounded-parallel (enumItemConcurrency=64).
+
+- **enumQdrant / enumChromaDB / enumWeaviate**: per-collection/per-class fetches run
+  concurrently via fanout(). Measured: 157 Qdrant hosts **4:02 -> 0:24 (~10x)**, findings
+  equivalent (parity within live-network variance); a 203-class Weaviate host in 22s.
+- Pattern still to roll to enumElasticsearch / enumClickHouse (per-index/per-db).
+
+Also (opt-in, gated off by default, MEASURED NEUTRAL on their own — kept as infra that
+composes with the above, NOT a speedup by themselves):
+- **AIMAP_FETCH_CACHE=1** — per-run GET dedup (bloom/CAS + single-flight) across all phases.
+- **AIMAP_PIPELINE=1** — no-phase-barrier per-host orchestration (flat worker pool).
+
+Honest note: raising -threads, removing phase barriers, and the fetch cache each measured
+0 speedup independently. The per-item loop parallelization is the lever.
+
 ## [v1.9.48] - 2026-06-05
 
 Cat-02 wave-2 GAP fingerprints — 9 new, scaffolded from `tome probe` configs, closing the

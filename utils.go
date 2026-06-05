@@ -172,7 +172,16 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
+// httpGET routes through the per-run fetch cache when AIMAP_FETCH_CACHE=1 (single-flight,
+// dedups overlapping GETs across all phases). Default: direct passthrough, unchanged behavior.
 func httpGET(c *http.Client, url string) (int, map[string]string, []byte, error) {
+	if fetchCacheOn && fetchCache != nil {
+		return fetchCache.get(c, url)
+	}
+	return httpGETRaw(c, url)
+}
+
+func httpGETRaw(c *http.Client, url string) (int, map[string]string, []byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return 0, nil, nil, err
