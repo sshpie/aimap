@@ -2,6 +2,22 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.50] - 2026-06-05
+
+Complete the per-item enum parallelization (v1.9.49 did Qdrant/Chroma/Weaviate):
+- **enumElasticsearch**: per-index `_mapping` probes now run via fanout() (extracted
+  `esIndexVectors` helper). Already capped at esMappingProbeCap=30, so a bounded but
+  consistent win.
+- **enumClickHouse**: per-db `SHOW TABLES` probes now run via fanout() (pre-capped to
+  chMaxDatabases, chMaxTables applied on aggregate). Already capped, bounded win.
+
+Race-tested: `go build -race` runs on live ES (9200) and ClickHouse (8123) host sets =
+0 data races. Each goroutine writes only its own slice index; aggregation after Wait.
+
+All five enum-heavy vendors (Qdrant, ChromaDB, Weaviate, Elasticsearch, ClickHouse) now
+parallelize their per-item loops. enumSuperset (credential attempts) and the small
+fixed-list loops (models/namespaces) intentionally left serial.
+
 ## [v1.9.49] - 2026-06-05
 
 Enum speed — parallelize per-item enumerator loops (the real bottleneck). The deep

@@ -4327,6 +4327,83 @@ func extractExtortionAttribution(c *http.Client, baseURL, marker string) map[str
 	return attrs
 }
 
+// esIndexVectors fetches one index's _mapping and returns {index, vector_fields} if it
+// declares dense/knn/sparse vector fields, else nil. Extracted so the per-index probe can
+// run concurrently (fanout) instead of serially — the ES enum loop bottleneck.
+func esIndexVectors(c *http.Client, b, idx string) map[string]interface{} {
+	st2, _, body2, err2 := httpGET(c, b+"/"+idx+"/_mapping")
+	if err2 != nil || st2 != 200 {
+		return nil
+	}
+	m2, err2 := parseJSON(body2)
+	if err2 != nil {
+		return nil
+	}
+	// Mapping shape: { "<index>": { "mappings": { "properties": { "<field>": {"type":"dense_vector","dims":N}, ... } } } }
+	idxMap, ok := m2[idx].(map[string]interface{})
+	if !ok {
+		// ES 7.x older-style: properties one level deeper
+		for _, v := range m2 {
+			if im, ok := v.(map[string]interface{}); ok {
+				idxMap = im
+				break
+			}
+		}
+	}
+	mappings, _ := idxMap["mappings"].(map[string]interface{})
+	props, _ := mappings["properties"].(map[string]interface{})
+	if props == nil {
+		return nil
+	}
+	vectorFields := make([]map[string]interface{}, 0)
+	// Walk top-level properties AND one level of nested objects — chunk
+	// schemas (Spring AI, LangChain Java) commonly use `chunks_<dim>:
+	// {type: nested, properties: {vector_embedding_<dim>: {knn_vector}}}`.
+	// Without this, a host like 84.247.189.64 (OpenSearch with chunks
+	// pattern) reports zero vector fields despite being clearly RAG.
+	walkProps := func(propMap map[string]interface{}, pathPrefix string) {
+		for fname, fdef := range propMap {
+			fmap, ok := fdef.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ftype := jStr(fmap, "type")
+			if ftype == "dense_vector" || ftype == "knn_vector" || ftype == "sparse_vector" {
+				// ES uses "dims", OpenSearch uses "dimension". Capture either.
+				dims := fmap["dims"]
+				if dims == nil {
+					dims = fmap["dimension"]
+				}
+				vectorFields = append(vectorFields, map[string]interface{}{
+					"field":      pathPrefix + fname,
+					"type":       ftype,
+					"dims":       dims,
+					"similarity": fmap["similarity"],
+				})
+			}
+		}
+	}
+	walkProps(props, "")
+	for fname, fdef := range props {
+		fmap, ok := fdef.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		ftype := jStr(fmap, "type")
+		if ftype != "nested" && ftype != "object" {
+			continue
+		}
+		inner, _ := fmap["properties"].(map[string]interface{})
+		if inner != nil {
+			walkProps(inner, fname+".")
+		}
+	}
+	if len(vectorFields) > 0 {
+		return map[string]interface{}{"index": idx, "vector_fields": vectorFields}
+	}
+	return nil
+}
+
 func enumElasticsearch(c *http.Client, svc ServiceMatch) EnumResult {
 	r := mkResult(svc)
 	b := svc.BaseURL
@@ -4565,80 +4642,14 @@ func enumElasticsearch(c *http.Client, svc ServiceMatch) EnumResult {
 		probeOrder = probeOrder[:esMappingProbeCap]
 	}
 
+	aiSlots := make([]map[string]interface{}, len(probeOrder))
+	fanout(len(probeOrder), enumItemConcurrency, func(i int) {
+		aiSlots[i] = esIndexVectors(c, b, probeOrder[i])
+	})
 	aiStackIndices := make([]map[string]interface{}, 0)
-	for _, idx := range probeOrder {
-		st2, _, body2, err2 := httpGET(c, b+"/"+idx+"/_mapping")
-		if err2 != nil || st2 != 200 {
-			continue
-		}
-		m2, err2 := parseJSON(body2)
-		if err2 != nil {
-			continue
-		}
-		// Mapping shape: { "<index>": { "mappings": { "properties": { "<field>": {"type":"dense_vector","dims":N}, ... } } } }
-		idxMap, ok := m2[idx].(map[string]interface{})
-		if !ok {
-			// ES 7.x older-style: properties one level deeper
-			for _, v := range m2 {
-				if im, ok := v.(map[string]interface{}); ok {
-					idxMap = im
-					break
-				}
-			}
-		}
-		mappings, _ := idxMap["mappings"].(map[string]interface{})
-		props, _ := mappings["properties"].(map[string]interface{})
-		if props == nil {
-			continue
-		}
-		vectorFields := make([]map[string]interface{}, 0)
-		// Walk top-level properties AND one level of nested objects — chunk
-		// schemas (Spring AI, LangChain Java) commonly use `chunks_<dim>:
-		// {type: nested, properties: {vector_embedding_<dim>: {knn_vector}}}`.
-		// Without this, a host like 84.247.189.64 (OpenSearch with chunks
-		// pattern) reports zero vector fields despite being clearly RAG.
-		walkProps := func(propMap map[string]interface{}, pathPrefix string) {
-			for fname, fdef := range propMap {
-				fmap, ok := fdef.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				ftype := jStr(fmap, "type")
-				if ftype == "dense_vector" || ftype == "knn_vector" || ftype == "sparse_vector" {
-					// ES uses "dims", OpenSearch uses "dimension". Capture either.
-					dims := fmap["dims"]
-					if dims == nil {
-						dims = fmap["dimension"]
-					}
-					vectorFields = append(vectorFields, map[string]interface{}{
-						"field":      pathPrefix + fname,
-						"type":       ftype,
-						"dims":       dims,
-						"similarity": fmap["similarity"],
-					})
-				}
-			}
-		}
-		walkProps(props, "")
-		for fname, fdef := range props {
-			fmap, ok := fdef.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			ftype := jStr(fmap, "type")
-			if ftype != "nested" && ftype != "object" {
-				continue
-			}
-			inner, _ := fmap["properties"].(map[string]interface{})
-			if inner != nil {
-				walkProps(inner, fname+".")
-			}
-		}
-		if len(vectorFields) > 0 {
-			aiStackIndices = append(aiStackIndices, map[string]interface{}{
-				"index":         idx,
-				"vector_fields": vectorFields,
-			})
+	for _, e := range aiSlots {
+		if e != nil {
+			aiStackIndices = append(aiStackIndices, e)
 		}
 	}
 	if len(aiStackIndices) > 0 {
@@ -4752,26 +4763,41 @@ func enumClickHouse(c *http.Client, svc ServiceMatch) EnumResult {
 	}
 	dbTables := make([]dbTable, 0)
 	tablesSeen := 0
+	// select non-system dbs to probe (capped), then SHOW TABLES per db CONCURRENTLY
+	var chProbe []string
 	for _, db := range dbNames {
 		if sysDBs[db] && db != "default" {
 			continue
 		}
-		if tablesSeen >= chMaxTables || len(dbTables) >= chMaxDatabases {
+		chProbe = append(chProbe, db)
+		if len(chProbe) >= chMaxDatabases {
 			break
 		}
+	}
+	chSlots := make([]dbTable, len(chProbe))
+	fanout(len(chProbe), enumItemConcurrency, func(i int) {
+		db := chProbe[i]
 		q := fmt.Sprintf("SHOW TABLES FROM `%s` FORMAT JSONEachRow", strings.ReplaceAll(db, "`", ""))
 		st2, _, body2, err2 := httpGET(c, b+"/?query="+urlQuery(q))
 		if err2 != nil || st2 != 200 {
-			continue
+			return
 		}
 		tbls := parseJSONEachRowNames(body2, "name")
-		// trim long table lists
 		shown := tbls
 		if len(shown) > 25 {
 			shown = shown[:25]
 		}
-		dbTables = append(dbTables, dbTable{Database: db, Tables: shown})
-		tablesSeen += len(shown)
+		chSlots[i] = dbTable{Database: db, Tables: shown}
+	})
+	for _, dt := range chSlots {
+		if dt.Database == "" {
+			continue
+		}
+		if tablesSeen >= chMaxTables {
+			break
+		}
+		dbTables = append(dbTables, dt)
+		tablesSeen += len(dt.Tables)
 	}
 	if len(dbTables) > 0 {
 		r.RawData["db_tables"] = dbTables
