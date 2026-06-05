@@ -3,12 +3,15 @@
 Fingerprint AI/ML infrastructure at population scale and enumerate what is exposed inside.
 
 aimap is a single Go binary that TCP-connects to a target's open ports, matches
-each response against a 196-fingerprint database of AI and ML services, then
+each response against a 218-fingerprint database of AI and ML services, then
 runs up to 62 dedicated deep enumerators that pull collections, model lists,
 experiment data, credentials in HTTP responses, claimable admin states, and PII
-fields from whatever service answers. Three output phases: port discovery,
-fingerprint matching, deep enumeration. The result is a JSON report shaped to
-feed directly into `visorlog ingest`, `winnow`, and SIEM pipelines.
+fields from whatever service answers. Three phases: port discovery, fingerprint
+matching, deep enumeration. The deep enumerators fetch per-collection /
+per-class / per-index data **concurrently** (bounded), so enum-heavy hosts — an
+unauth Qdrant with hundreds of collections — finish in seconds instead of
+minutes (see Performance). The result is a JSON report shaped to feed directly
+into `visorlog ingest`, `winnow`, and SIEM pipelines.
 
 We built aimap because generic scanners (nmap, nuclei) see an open port and stop.
 They do not know that the Ollama on port 11434 exposes every model it holds, that
@@ -84,11 +87,11 @@ reduction compared to the 42-port default.
 
 Define new profiles in `port_classes.go`: one map entry, no other files touched.
 
-## What aimap fingerprints (196 services, 62 deep enumerators)
+## What aimap fingerprints (218 services, 62 deep enumerators)
 
 | Category | Services |
 |----------|----------|
-| Vector databases | Weaviate, ChromaDB, Qdrant, Milvus, Apache Solr, Meilisearch, Typesense, Vespa |
+| Vector databases | Weaviate, ChromaDB, Qdrant, Milvus, Marqo, Manticore, SurrealDB, Infinity (InfiniFlow), Databend, GreptimeDB, Epsilla, OceanBase, Neo4j, Couchbase, Apache Solr, Meilisearch, Typesense, Vespa |
 | LLM runtimes | Ollama, llama.cpp server, vLLM, SGLang, LocalAI, text-generation-webui |
 | RAG frameworks | AnythingLLM, LightRAG, PrivateGPT, txtai, Cognita, R2R, Kotaemon, Quivr, Danswer/Onyx, Verba, DocsGPT, Ragapp, Perplexica, RAGFlow |
 | Image generation | ComfyUI, AUTOMATIC1111 / SD WebUI, InvokeAI, Fooocus, SwarmUI |
@@ -116,12 +119,31 @@ Define new profiles in `port_classes.go`: one map entry, no other files touched.
 | Notebooks / dev | Jupyter Notebook, Open Directory, Docker Registry |
 | Cross-cutting | Exposed API credentials (Langfuse, Helicone, Stripe, Anthropic, LangSmith, OpenRouter, Slack) |
 
-62 of the 196 services have dedicated deep enumerators. They surface:
+62 of the 218 services have dedicated deep enumerators. They surface:
 - PII fields in vector DB collections
 - Unauthenticated model execution surfaces
 - Exposed credentials in HTTP responses
 - Claimable admin states (unconfigured Metabase, Flowise credential panels)
 - Data counts, schema names, and experiment metadata
+
+## Performance
+
+The deep-enum stage is where the time goes: a vector store with hundreds of
+collections means hundreds of per-collection metadata reads. aimap runs those
+per-item reads **concurrently** with a bounded worker pool (the enum-heavy
+vendors — Qdrant, ChromaDB, Weaviate, Elasticsearch, ClickHouse — fan out their
+per-collection / per-class / per-index probes). Measured on a 157-host unauthenticated
+Qdrant population: **4:02 → 0:24, ~10x**, with identical findings.
+
+What we measured but did **not** find to be the lever (kept honest):
+- raising `-threads` (host-level concurrency): no change on enum-bound runs
+- a per-run GET response cache (`AIMAP_FETCH_CACHE=1`, opt-in): correct, ~8% fewer
+  requests, no wall-time change on its own
+- a no-phase-barrier per-host pipeline (`AIMAP_PIPELINE=1`, opt-in): no change on its own
+
+The bottleneck was the serial per-item loop inside the enumerators, not the
+orchestration. Parallelizing that loop is the speedup; the two opt-in flags are
+gated off by default and compose with it.
 
 ## JSON output shape
 
@@ -156,7 +178,7 @@ Risk levels: `critical`, `high`, `medium`, `low`, `info`. The escalation rule:
   ██╔══██║██║██║╚██╔╝██║██╔══██║██╔═══╝
   ██║  ██║██║██║ ╚═╝ ██║██║  ██║██║
   ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝
-  AI Infrastructure Mapper v1.9.46
+  AI Infrastructure Mapper v1.9.50
   by NuClide
 
   PHASE 1: PORT DISCOVERY
