@@ -4178,15 +4178,31 @@ var Fingerprints = []Fingerprint{
 		// Fingerprint not added; would require single-word body match on
 		// "axolotl" (FP risk from unrelated content).
 		Name:         "LLaMA-Factory",
-		DefaultPorts: []int{7860, 8000, 80, 443},
+		// Training-UI ports added 2026-06-05 (field-observed LlamaBoard on
+		// 10000/10004/10007/6006 in the Cat-04 survey).
+		DefaultPorts: []int{7860, 8000, 80, 443, 10000, 10004, 10007, 6006},
 		Probes: []Probe{
-			// Gradio WebUI probe — title contains brand string
+			// PRIMARY (2026-06-05): LlamaBoard webui. The Gradio 5.x API-info
+			// endpoint lists named_endpoints including /get_model_info — a
+			// LLaMA-Factory-unique webui callback. This is title- and
+			// version-stable: it fires on "LLaMA Board"-branded hosts (which
+			// carry zero "LLaMA Factory" string) and it survives aimap's 1 MB
+			// body cap, where the / probe below TRUNCATES — on 1.5 MB board
+			// pages the brand string is buried >1 MB deep in window.gradio_config.
+			// Field-verified on 121.46.230.100:10004, 139.224.134.227:6006.
+			{Path: "/gradio_api/info", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "get_model_info"},
+			}},
+			// Gradio WebUI probe — title contains brand string (lighter builds
+			// where the marker lands inside the 1 MB window).
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "LLaMA Factory"},
 				{Type: "body_contains", Value: "gradio"},
 			}},
-			// FastAPI inference server probe — LLaMA-Factory-unique path
+			// FastAPI inference server probe — api.py (separate process from
+			// the webui; /v1/* 404s on a webui-only deployment).
 			{Path: "/v1/score/evaluation", Matches: []MatchCond{
 				{Type: "status_code", Value: "405"},
 				{Type: "body_contains", Value: "Method Not Allowed"},
@@ -4226,6 +4242,103 @@ var Fingerprints = []Fingerprint{
 			}},
 		},
 		Severity: "high",
+	},
+
+	// ── Cat-04 training / fine-tuning (2026-06-05) ────────────────────────────
+	// OpenLLM (bentoml/OpenLLM) — `openllm serve` shells `bentoml serve`, so the
+	// runtime IS a BentoML HTTP server (port 3000) serving an OpenAI-compat /v1
+	// surface. aimap already IDs the BentoML control plane separately; this FP
+	// flags the LLM-serving variant. Discriminator: the BentoML schema doc
+	// (/docs.json, BentoML-specific path — vLLM serves /openapi.json instead)
+	// that ALSO lists the OpenAI chat route. Auth NONE by default. Inherits
+	// BentoML CVE-2025-27520 (CVSS 9.8 unauth RCE) / CVE-2025-32375 (runner
+	// pickle RCE) — open inference escalates to host RCE on unpatched versions.
+	{
+		Name:         "OpenLLM",
+		DefaultPorts: []int{3000, 80, 443},
+		Probes: []Probe{
+			{Path: "/docs.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "openapi"},
+				{Type: "body_contains", Value: "/v1/chat/completions"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Determined AI (determined-ai/determined; HPE MLDE) — distributed training
+	// platform master on 8080 (plaintext) / 8443 (TLS). Exactly 3 unauth RPCs:
+	// Login, GetMaster, GetTelemetry (source master/internal/grpcutil/auth.go).
+	// GET /api/v1/master returns camelCase JSON with required clusterId +
+	// masterId + version — unauth metadata leak by design. Everything sensitive
+	// (experiments, checkpoints, training data, command/shell submission =
+	// arbitrary container exec on cluster GPUs) sits behind the Bearer gate, so
+	// auth tier A*. Real takeover path is a credential-default chain: OSS ships
+	// a built-in `determined` admin with an EMPTY password — active login, NOT
+	// probed here. 0 CVEs as of 2026-06.
+	{
+		Name:         "Determined AI",
+		DefaultPorts: []int{8080, 8443, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/v1/master", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "clusterId"},
+				{Type: "json_field", Field: "masterId"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Feast (feast-dev/feast) — feature store. Feature server on 6566 (REST +
+	// gRPC), UI/registry on 8888. Auth NONE by default (auth fires only when
+	// auth_config.type is set). The high-signal route (/get-online-features) is
+	// POST-only = Shodan-dark; aimap confirms via GET signals. The route name
+	// "get-online-features" is Feast-unique: it appears in the FastAPI
+	// /openapi.json route list, and a GET to the path returns 405 (route exists,
+	// POST-only) where a non-Feast server 404s. CVE-2026-23536 (CVSS 7.5) —
+	// unauth path traversal / arbitrary file read on the feature server; chains
+	// feature-value read -> feature_store.yaml cloud-cred theft.
+	{
+		Name:         "Feast",
+		DefaultPorts: []int{6566, 8888, 8000},
+		Probes: []Probe{
+			// FastAPI schema lists the Feast-unique route.
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "get-online-features"},
+			}},
+			// Fallback when docs are disabled: the POST-only route exists (405),
+			// not 404. Allow header confirms it is a real method mismatch.
+			{Path: "/get-online-features", Matches: []MatchCond{
+				{Type: "status_code", Value: "405"},
+				{Type: "header_contains", Field: "Allow", Value: "POST"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Lightning App (Lightning-AI; legacy `lightning run app` framework) —
+	// FastAPI/uvicorn on 7501 (APP_SERVER_PORT). DEPRECATED and removed from
+	// current pytorch-lightning main — shrinking legacy population (~3 Shodan
+	// hits). NOTE: the pytorch-lightning library itself has NO server; only the
+	// app framework does. /healthz returns a generic {"status":"ok"}, so anchor
+	// on the unforgeable session-header error literal (source app/core/api.go)
+	// or the Lightning-unique OpenAPI tag. Session headers are a coordination
+	// check, not authentication.
+	{
+		Name:         "Lightning App",
+		DefaultPorts: []int{7501},
+		Probes: []Probe{
+			{Path: "/api/v1/spec", Matches: []MatchCond{
+				{Type: "status_code", Value: "500"},
+				{Type: "body_contains", Value: "Missing X-Lightning-Session-UUID header"},
+			}},
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "app_client_command"},
+			}},
+		},
+		Severity: "low",
 	},
 
 	// ── ML Governance / Data Catalog ──────────────────────────────────────────

@@ -2,6 +2,34 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.52] - 2026-06-05
+
+Cat-04 training/fine-tuning fingerprints + a field-found LLaMA-Factory false-negative fix.
+
+### New fingerprints
+
+- **OpenLLM** (`bentoml/OpenLLM`, port 3000) — BentoML-served OpenAI-compat LLM. Keys on
+  `/docs.json` OpenAPI schema containing `/v1/chat/completions` (distinguishes from a bare
+  vLLM, which serves `/openapi.json`, and from a generic BentoML service). Inherits BentoML
+  CVE-2025-27520 (CVSS 9.8 unauth RCE) / CVE-2025-32375.
+- **Determined AI** (HPE MLDE, ports 8080/8443) — `/api/v1/master` returns unauth `clusterId`
+  + `masterId` + `version` by design (3 whitelisted RPCs); sensitive tier Bearer-gated (A*).
+- **Feast** (`feast-dev/feast`, port 6566) — feature store, auth none by default. The
+  Feast-unique route `get-online-features` is POST-only (Shodan-dark), so the FP confirms via
+  `/openapi.json` route listing + a 405-on-GET fallback. CVE-2026-23536 (unauth file read).
+- **Lightning App** (legacy `lightning run app`, port 7501) — anchors on the session-header
+  error literal; population is legacy/shrinking.
+
+### Fixes
+
+- **LLaMA-Factory false-negative** — the `/` brand-string probe truncated on Gradio 5.x
+  LlamaBoard pages (the `"LLaMA Factory"` marker sits >1 MB deep in `window.gradio_config`,
+  past aimap's 1 MB body cap), and the `/v1/score/evaluation` probe hit the wrong process
+  (webui, not api.py). Added a `/gradio_api/info` → `get_model_info` probe (small JSON,
+  version- and title-stable, fires on `"LLaMA Board"`-branded hosts too) and the
+  field-observed training-UI ports 10000/10004/10007/6006. Field-verified: recovered 4 live
+  unauthenticated LlamaBoard UIs the prior FP was blind to.
+
 ## [v1.9.51] - 2026-06-05
 
 Two new deep enumerators (One API, Argilla), neon pink banner, Cat-03 model serving
