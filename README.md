@@ -19,6 +19,26 @@ the Flowise on port 3000 stores OpenAI keys in its credentials panel, or that th
 Jupyter on port 8888 has no token. aimap knows all of those things and surfaces
 them in a single pass.
 
+## Screenshots
+
+**Phase 2 — AI service fingerprinting**
+![Phase 2 fingerprinting](screenshot-fingerprinting.png)
+
+**Phase 3 — Deep enumeration**
+![Phase 3 deep enumeration](screenshot-phase3.png)
+
+**Service cards**
+![Service cards](screenshot-deep-enum.png)
+
+**Ollama — unauthenticated inference (CRIT)**
+![Ollama service card](screenshot-service-card.png)
+
+**One API — default credentials active (CRIT)**
+![One API default creds](screenshot-oneapi-crit.png)
+
+**Full summary — 11 hosts, 14 services, ML-adjacent infrastructure**
+![Full summary](screenshot-summary.png)
+
 ## Install
 
 ```
