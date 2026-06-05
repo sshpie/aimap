@@ -1,4 +1,12 @@
-# aimap
+```
+   █████╗ ██╗███╗   ███╗ █████╗ ██████╗
+  ██╔══██╗██║████╗ ████║██╔══██╗██╔══██╗
+  ███████║██║██╔████╔██║███████║██████╔╝
+  ██╔══██║██║██║╚██╔╝██║██╔══██║██╔═══╝
+  ██║  ██║██║██║ ╚═╝ ██║██║  ██║██║
+  ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝
+  AI Infrastructure Mapper — by NuClide
+```
 
 Fingerprint AI/ML infrastructure at population scale and enumerate what is exposed inside.
 
