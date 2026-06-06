@@ -2,6 +2,33 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [v1.9.53] - 2026-06-05
+
+Cat-03 Model Serving survey verification pass: four false-positive fingerprints fixed and one
+false-negative closed, all field-found during the 158-host Cat-03 survey. Adds 11 regression
+tests (`fingerprints_cat03_fp_test.go`).
+
+### False-positive fixes
+
+- **GPT Researcher** — removed the `/api/report` 405 + "method not allowed" probe. Gradio mounts
+  a FastAPI catch-all that returns 405 on any unmatched route, so the probe matched every Gradio
+  app; four "Whisper Playground" hosts were mislabelled. A bare 405 carries no GPT-Researcher
+  signal, so the body-anchored `/` probe (`gpt_researcher`) is now the only identifier.
+- **Lunary** — `/api/v1/health` `{"status":"ok"}` anchor also matched CheckRef (a scholarly
+  reference validator). Added `crossref` / `openalex` anti-matches (never present in Lunary).
+- **h2oGPT** — `/openai_api/v1/models` matched KoboldCpp, which serves the same path. Added
+  `body_not_contains: koboldcpp` (KoboldCpp tags models `owned_by:koboldcpp`).
+- **Coqui XTTS** / **Chatterbox TTS** — `/api/tts/speakers` and `/get_predefined_voices` matched
+  ZenTao, whose PHP router echoes the requested path in a 200 error body. Added anti-matches on
+  `router.class.php`, `<!doctype`, and the `zentaosid` Set-Cookie.
+
+### False-negative fix
+
+- **KoboldCpp** — added a `/` probe keyed on the `Server: KoboldCppServer` header. The existing
+  `/api/extra/version` probe missed a live KoboldCpp (108.210.175.159:5001) whose version
+  endpoint was unreachable on crawl while the KoboldAI Lite UI served on `/`; h2oGPT had claimed
+  the host instead.
+
 ## [v1.9.52] - 2026-06-05
 
 Cat-04 training/fine-tuning fingerprints + a field-found LLaMA-Factory false-negative fix.

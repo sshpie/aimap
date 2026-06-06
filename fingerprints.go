@@ -307,6 +307,16 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: `"result":"KoboldCpp"`},
 			}},
+			// FN fix (2026-06-05, Cat-03): every KoboldCpp response carries
+			// `Server: KoboldCppServer` and the landing page is `<title>KoboldAI
+			// Lite</title>`. 108.210.175.159:5001 was a live KoboldCpp that this
+			// fingerprint MISSED (h2oGPT claimed it instead) because the
+			// /api/extra/version probe was unreachable on that crawl while `/`
+			// served the Lite UI. The Server header is zero-FP across the corpus.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "header_contains", Field: "Server", Value: "KoboldCppServer"},
+			}},
 		},
 		Severity: "medium",
 	},
@@ -2870,17 +2880,21 @@ var Fingerprints = []Fingerprint{
 		// The Python module name "gpt_researcher" (underscore) surfaces in
 		// JS bundle import paths and static asset URLs — more distinctive than
 		// the hyphenated URL slug and survives CDN caching.
-		// /api/report is the primary generation endpoint; accessible unauth by default.
+		//
+		// FP fix (2026-06-05, Cat-03): removed the /api/report 405 +
+		// "method not allowed" probe. Gradio mounts a FastAPI catch-all that
+		// returns 405 "Method Not Allowed" on any unmatched route, so that
+		// probe matched every Gradio app — four "Whisper Playground" hosts
+		// (15.235.9.143, 88.198.67.137, 34.47.31.176, 91.99.202.219:8000)
+		// were mislabelled GPT Researcher. A bare 405 carries no
+		// GPT-Researcher-specific signal, so it cannot be made sound; the
+		// body-anchored "/" probe below is the only reliable identifier.
 		Name:         "GPT Researcher",
 		DefaultPorts: []int{8000, 8080},
 		Probes: []Probe{
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "gpt_researcher"},
-			}},
-			{Path: "/api/report", Matches: []MatchCond{
-				{Type: "status_code", Value: "405"},
-				{Type: "body_contains", Value: "method not allowed"},
 			}},
 		},
 		Severity: "high",
@@ -3294,9 +3308,17 @@ var Fingerprints = []Fingerprint{
 		// a tts-form class.
 		DefaultPorts: []int{8020, 5002, 8000, 8040, 80, 443},
 		Probes: []Probe{
+			// anti-ZenTao (2026-06-05 Cat-03 FP): ZenTao's PHP router echoes the
+			// requested path in its error page ("'api/tts/speakers' illegal ...
+			// router.class.php") with status 200, so the bare "speaker" substring
+			// matched 61.171.112.92:8000 (a ZenTao PM app). The real endpoint
+			// returns a JSON speaker list, not an HTML error page.
 			{Path: "/api/tts/speakers", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "speaker"},
+				{Type: "body_not_contains", Value: "router.class.php"},
+				{Type: "body_not_contains", Value: "<!doctype"},
+				{Type: "header_not_contains", Field: "Set-Cookie", Value: "zentaosid"},
 			}},
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
@@ -3523,9 +3545,16 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "engine"},
 			}},
+			// anti-ZenTao (2026-06-05 Cat-03 FP): same path-echo FP class as the
+			// Coqui XTTS /api/tts/speakers probe — ZenTao reflects "/get_predefined_voices"
+			// in a 200 error body, matching the bare "voice" substring. Real
+			// endpoint returns JSON, not the PHP-router HTML error page.
 			{Path: "/get_predefined_voices", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "voice"},
+				{Type: "body_not_contains", Value: "router.class.php"},
+				{Type: "body_not_contains", Value: "<!doctype"},
+				{Type: "header_not_contains", Field: "Set-Cookie", Value: "zentaosid"},
 			}},
 			{Path: "/docs", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
@@ -3750,6 +3779,12 @@ var Fingerprints = []Fingerprint{
 				{Type: "body_not_contains", Value: "qdrant"},  // anti-Qdrant (2026-05-15 FP)
 				{Type: "body_not_contains", Value: "milvus"},  // anti-Milvus body (2026-05-15 FP)
 				{Type: "header_not_contains", Field: "Server", Value: "Milvus/"}, // anti-Milvus Server header
+				// anti-CheckRef (2026-06-05 Cat-03 FP): the scholarly-reference
+				// app CheckRef returns {"status":"ok","services":{...},"apis":
+				// {"crossref":...,"openalex":...}} on /api/v1/health and matched
+				// the bare "status:ok" anchor. crossref/openalex never appear in Lunary.
+				{Type: "body_not_contains", Value: "crossref"},
+				{Type: "body_not_contains", Value: "openalex"},
 			}},
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
@@ -4856,9 +4891,14 @@ var Fingerprints = []Fingerprint{
 				{Type: "body_contains", Value: "submit_nochat_plain_api"},
 			}},
 			// OpenAI-compat /models endpoint
+			// anti-KoboldCpp (2026-06-05 Cat-03 FP): KoboldCpp serves the same
+			// /openai_api/v1/models path with a "data" array, so 108.210.175.159:5001
+			// (a real KoboldCpp) was mislabelled h2oGPT. KoboldCpp tags every model
+			// with owned_by:"koboldcpp" and an id prefixed "koboldcpp/".
 			{Path: "/openai_api/v1/models", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "data"},
+				{Type: "body_not_contains", Value: "koboldcpp"},
 			}},
 		},
 		Severity: "medium",
