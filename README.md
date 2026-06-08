@@ -17,7 +17,6 @@
   <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
-  <a href="#work-role-mapping">Work Roles</a> •
   <a href="#what-aimap-fingerprints">Fingerprints</a> •
   <a href="#output">Output</a> •
   <a href="#scope">Scope</a>
@@ -116,22 +115,6 @@ Default 42-port list: `80,443,1984,2379,3000,3001,4000,4040,4200,5000,5001,5678,
 | `minimal` | 4 | quick host-alive HTTP probe |
 
 Add a new profile in `port_classes.go`. One map entry. No other files touched.
-
-# Work-role mapping
-
-aimap supports the federal cyber work roles defined in the [DoD Cyber Workforce Framework](https://public.cyber.mil/wid/dcwf/) and the broader [NICE Framework](https://niccs.cisa.gov/workforce-development/nice-framework). Each role does a piece of the assessment cycle. aimap produces the evidence each role needs.
-
-| Work role | Role definition | What aimap provides |
-|-----------|------------------|---------------------|
-| **541** Vulnerability Assessment Analyst | Performs assessments of systems and networks within the enclave and identifies where they deviate from acceptable configurations, enclave policy, or local policy. Measures effectiveness of defense-in-depth architecture against known vulnerabilities. | Port-to-service fingerprint pass over a host, CIDR, or target list. Each deviation (no auth, default admin, world-readable collection) lands as a typed finding with severity. |
-| **671** System Testing and Evaluation Specialist | Plans, prepares, and executes tests of systems to evaluate results against specifications and requirements as well as analyze and report test results. | Reproducible test runs. JSON report keyed to host, port, service, version, auth status, and risk level. Same input, same output. |
-| **461** Systems Security Analyst | Responsible for the analysis and development of the integration, testing, operations, and maintenance of systems security. | Inventory of AI services running inside the enclave, with version and posture for each. |
-| **511** Cyber Defense Analyst | Uses data collected from a variety of cyber defense tools to analyze events that occur within their environment. | Per-host adjacency rows (an Ollama next to a Postgres on the same IP) for use as a detection seed. |
-| **623** AI/ML Specialist (DCWF) | Designs, develops, and modifies AI tools. | Surfaces the deployment posture of the runtimes, vector stores, and orchestrators the role builds against. |
-| **672** AI Test and Evaluation Specialist (DCWF) | Plans and executes V&V on AI systems. Adversarial testing in operationally realistic environments. | Active enumeration of AI services at population scale. Each fingerprint match is a falsifiable claim and re-runnable on demand. |
-| **733** AI Risk and Ethics Specialist (DCWF) | Risk assessment and responsible AI. PHI and PII handling. Bias and ethics review. | Names the PHI and PII fields in vector collections, the exposed credentials, and the platforms routing customer data without auth. |
-
-The output schema carries the fields each role uses. A 541 assessment lands them in a report. A 671 plan turns the same fields into pass/fail criteria. A 733 review reads the `details` block for data-class exposure.
 
 # What aimap fingerprints
 
