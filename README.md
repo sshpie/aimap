@@ -1,117 +1,145 @@
-![aimap](banner.png)
+<h1 align="center">
+  <img src="banner.png" alt="aimap" width="600px">
+  <br>
+</h1>
 
-Fingerprint AI/ML infrastructure at population scale and enumerate what is exposed inside.
+<h4 align="center">A fast vulnerability scanner for AI and machine-learning infrastructure.</h4>
 
-aimap is a single Go binary that TCP-connects to a target's open ports, matches
-each response against a 218-fingerprint database of AI and ML services, then
-runs up to 62 dedicated deep enumerators that pull collections, model lists,
-experiment data, credentials in HTTP responses, claimable admin states, and PII
-fields from whatever service answers. Three phases: port discovery, fingerprint
-matching, deep enumeration. The deep enumerators fetch per-collection /
-per-class / per-index data **concurrently** (bounded), so enum-heavy hosts — an
-unauth Qdrant with hundreds of collections — finish in seconds instead of
-minutes (see Performance). The result is a JSON report shaped to feed directly
-into `visorlog ingest`, `winnow`, and SIEM pipelines.
+<p align="center">
+  <a href="https://github.com/nuclide-research/aimap/releases"><img src="https://img.shields.io/github/v/release/nuclide-research/aimap?style=flat-square" alt="release"></a>
+  <a href="https://github.com/nuclide-research/aimap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nuclide-research/aimap?style=flat-square" alt="license"></a>
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/go-1.21%2B-00ADD8?style=flat-square&logo=go" alt="go"></a>
+  <a href="https://github.com/nuclide-research/aimap/releases"><img src="https://img.shields.io/github/downloads/nuclide-research/aimap/total?style=flat-square" alt="downloads"></a>
+  <a href="https://nuclide-research.com"><img src="https://img.shields.io/badge/by-NuClide-blue?style=flat-square" alt="NuClide"></a>
+</p>
 
-We built aimap because generic scanners (nmap, nuclei) see an open port and stop.
-They do not know that the Ollama on port 11434 exposes every model it holds, that
-the Flowise on port 3000 stores OpenAI keys in its credentials panel, or that the
-Jupyter on port 8888 has no token. aimap knows all of those things and surfaces
-them in a single pass.
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#work-role-mapping">Work Roles</a> •
+  <a href="#what-aimap-fingerprints">Fingerprints</a> •
+  <a href="#output">Output</a> •
+  <a href="#scope">Scope</a>
+</p>
 
-## Screenshots
+<p align="center">
+  <img src="screenshot-summary.png" alt="aimap-run">
+</p>
 
-**Phase 2 — AI service fingerprinting**
-![Phase 2 fingerprinting](screenshot-fingerprinting.png)
+---
 
-**Phase 3 — Deep enumeration**
-![Phase 3 deep enumeration](screenshot-phase3.png)
+aimap is a single Go binary that fingerprints exposed AI and ML services and enumerates what is reachable inside. It opens a TCP connection to each port on the target, matches the response against 218 fingerprints, then runs up to 62 dedicated deep enumerators on whatever answers. The enumerators surface collection names, model lists, experiment metadata, credentials returned in HTTP responses, claimable admin states, and PII fields. Output is a JSON report sized to feed `visorlog ingest`, `winnow`, and SIEM pipelines.
 
-**Service cards**
-![Service cards](screenshot-deep-enum.png)
+Generic port scanners stop at the open port. aimap reads the service behind it. An Ollama on 11434 lists every model it holds. A Flowise on 3000 can return OpenAI keys from its credentials panel. A Jupyter on 8888 may answer without a token. aimap reports each of those in one pass.
 
-**Ollama — unauthenticated inference (CRIT)**
-![Ollama service card](screenshot-service-card.png)
+# Features
 
-**One API — default credentials active (CRIT)**
-![One API default creds](screenshot-oneapi-crit.png)
+![aimap-flow](screenshot-fingerprinting.png)
 
-**Full summary — 11 hosts, 14 services, ML-adjacent infrastructure**
-![Full summary](screenshot-summary.png)
+- 218 service fingerprints across LLM runtimes, vector databases, ML platforms, agent frameworks, model servers, MCP, observability, medical AI, and code assistants
+- 62 dedicated deep enumerators that pull data behind the banner, not just identify the banner
+- Single static Go binary, zero dependencies, Linux amd64 and arm64 builds
+- Conjunctive matcher (`status_code` + `json_field` + `body_contains`) for low false-positive rate at population scale
+- 14 hand-curated port profiles (`llm-gateway`, `vector-db`, `observability`, `healthcare`, `mcp`, ...) for fast per-class sweeps
+- Bounded concurrent per-item enumeration. Measured 10x speedup on enum-heavy vendors
+- JSON report keyed to host, port, service, version, auth status, and risk level
+- Adjacency rows mark ML-relevant data tiers sitting next to AI services on the same host
+- Honeypot filter (`-exclude-compromised`) drops Meow-class extortion-wiped hosts from the report
+- Read-only by design. HTTP GETs and TCP connects. No POSTs, no exploits, no writes
 
-## Install
+# Installation
 
-```
-go install github.com/nuclide-research/aimap@latest
+```bash
+go install -v github.com/nuclide-research/aimap@latest
 ```
 
 Or build from source:
 
-```
+```bash
 git clone https://github.com/nuclide-research/aimap
 cd aimap
 go build -o aimap .
 ```
 
-Pre-built Linux amd64 and arm64 binaries are on the releases page.
+Pre-built Linux amd64 and arm64 binaries are on the [releases page](https://github.com/nuclide-research/aimap/releases). Requires Go 1.21 or later.
 
-Go 1.21+, zero external dependencies.
+# Usage
 
-## Usage
-
-```
+```console
 aimap -target 192.0.2.10
 aimap -target 10.0.0.0/24 -threads 50 -o audit.json
 aimap -list ips.txt -ports-class llm-gateway -threads 30 -o out.json
 aimap -version
 ```
 
+<details>
+  <summary>Full help (aimap -h)</summary>
+
 | Flag | Default | Effect |
 |------|---------|--------|
-| `-target` | (required) | single IP, hostname, or CIDR |
-| `-list` | | file of targets, one per line; `#` comments supported |
+| `-target` | required | single IP, hostname, or CIDR |
+| `-list` | | file of targets, one per line. `#` comments supported |
 | `-ports` | 42-port default set | comma-separated port list |
-| `-ports-class` | | named port profile (see below); overrides `-ports` |
+| `-ports-class` | | named port profile. Overrides `-ports` |
 | `-timeout` | `5s` | per-connection timeout |
 | `-threads` | `20` | concurrent scan threads |
 | `-o` | | JSON report output file |
 | `-v` | off | verbose output |
-| `-scan-all-fingerprints` | off | probe every fingerprint on every open port, bypassing the DefaultPorts filter |
-| `-exclude-compromised` | off | drop extortion-wiped hosts (Meow-class) from the report |
+| `-scan-all-fingerprints` | off | probe every fingerprint on every open port |
+| `-exclude-compromised` | off | drop extortion-wiped hosts (Meow-class) |
 | `-version` | | print version and exit |
 
 Default 42-port list: `80,443,1984,2379,3000,3001,4000,4040,4200,5000,5001,5678,6333,7575,7576,7860,8000,8001,8080,8081,8088,8123,8233,8265,8443,8501,8787,8888,8889,9000,9090,9091,9200,10000,11434,15500,18080,18789,19530,30000,51000,55000`
 
-## Port profiles
+</details>
 
-`-ports-class <name>` narrows the port list to a hand-curated set for a specific
-service class. On a typical population survey this gives a 5-10x wall-time
-reduction compared to the 42-port default.
+# Port profiles
+
+`-ports-class <name>` narrows the port list to a hand-curated set for a specific service class. On a typical population survey this is a 5x to 10x wall-time reduction over the 42-port default.
 
 | Profile | Ports | Best for |
 |---------|-------|----------|
-| `llm-gateway` | 12 ports | Ollama, vLLM, TGI, Open WebUI, LiteLLM, sub2api |
-| `vector-db` | 11 ports | Qdrant, Weaviate, ChromaDB, Milvus |
-| `observability` | 10 ports | Langfuse, Helicone, MLflow, Phoenix, Prometheus |
-| `registry` | 11 ports | Docker, Harbor, Quay |
-| `network-mesh` | 19 ports | Envoy admin, Istio, Linkerd, Kiali, Cilium |
-| `workflow-orch` | 10 ports | Prefect, Dagster, Temporal, Argo |
-| `browser-control` | 9 ports | CDP, Selenium Grid, Playwright MCP |
-| `sub2api` | 6 ports | sub2api-class pooled-account proxies |
-| `jetson` | 11 ports | Jetson edge AI, Triton, Frigate |
-| `healthcare` | 10 ports | DICOM / PACS / dcm4chee / Orthanc |
-| `finance` | 10 ports | QuantConnect, OpenBB, JESSE |
-| `mcp` | 9 ports | Model Context Protocol servers |
-| `wide` | 42 ports | the default catch-all, explicit selection |
-| `minimal` | 4 ports | quick host-alive HTTP probe |
+| `llm-gateway` | 12 | Ollama, vLLM, TGI, Open WebUI, LiteLLM, sub2api |
+| `vector-db` | 11 | Qdrant, Weaviate, ChromaDB, Milvus |
+| `observability` | 10 | Langfuse, Helicone, MLflow, Phoenix, Prometheus |
+| `registry` | 11 | Docker, Harbor, Quay |
+| `network-mesh` | 19 | Envoy admin, Istio, Linkerd, Kiali, Cilium |
+| `workflow-orch` | 10 | Prefect, Dagster, Temporal, Argo |
+| `browser-control` | 9 | CDP, Selenium Grid, Playwright MCP |
+| `sub2api` | 6 | sub2api-class pooled-account proxies |
+| `jetson` | 11 | Jetson edge AI, Triton, Frigate |
+| `healthcare` | 10 | DICOM, PACS, dcm4chee, Orthanc |
+| `finance` | 10 | QuantConnect, OpenBB, JESSE |
+| `mcp` | 9 | Model Context Protocol servers |
+| `wide` | 42 | the default catch-all, explicit selection |
+| `minimal` | 4 | quick host-alive HTTP probe |
 
-Define new profiles in `port_classes.go`: one map entry, no other files touched.
+Add a new profile in `port_classes.go`. One map entry. No other files touched.
 
-## What aimap fingerprints (218 services, 62 deep enumerators)
+# Work-role mapping
+
+aimap supports the federal cyber work roles defined in the [DoD Cyber Workforce Framework](https://public.cyber.mil/wid/dcwf/) and the broader [NICE Framework](https://niccs.cisa.gov/workforce-development/nice-framework). Each role does a piece of the assessment cycle. aimap produces the evidence each role needs.
+
+| Work role | Role definition | What aimap provides |
+|-----------|------------------|---------------------|
+| **541** Vulnerability Assessment Analyst | Performs assessments of systems and networks within the enclave and identifies where they deviate from acceptable configurations, enclave policy, or local policy. Measures effectiveness of defense-in-depth architecture against known vulnerabilities. | Port-to-service fingerprint pass over a host, CIDR, or target list. Each deviation (no auth, default admin, world-readable collection) lands as a typed finding with severity. |
+| **671** System Testing and Evaluation Specialist | Plans, prepares, and executes tests of systems to evaluate results against specifications and requirements as well as analyze and report test results. | Reproducible test runs. JSON report keyed to host, port, service, version, auth status, and risk level. Same input, same output. |
+| **461** Systems Security Analyst | Responsible for the analysis and development of the integration, testing, operations, and maintenance of systems security. | Inventory of AI services running inside the enclave, with version and posture for each. |
+| **511** Cyber Defense Analyst | Uses data collected from a variety of cyber defense tools to analyze events that occur within their environment. | Per-host adjacency rows (an Ollama next to a Postgres on the same IP) for use as a detection seed. |
+| **623** AI/ML Specialist (DCWF) | Designs, develops, and modifies AI tools. | Surfaces the deployment posture of the runtimes, vector stores, and orchestrators the role builds against. |
+| **672** AI Test and Evaluation Specialist (DCWF) | Plans and executes V&V on AI systems. Adversarial testing in operationally realistic environments. | Active enumeration of AI services at population scale. Each fingerprint match is a falsifiable claim and re-runnable on demand. |
+| **733** AI Risk and Ethics Specialist (DCWF) | Risk assessment and responsible AI. PHI and PII handling. Bias and ethics review. | Names the PHI and PII fields in vector collections, the exposed credentials, and the platforms routing customer data without auth. |
+
+The output schema carries the fields each role uses. A 541 assessment lands them in a report. A 671 plan turns the same fields into pass/fail criteria. A 733 review reads the `details` block for data-class exposure.
+
+# What aimap fingerprints
+
+218 services across 27 categories. 62 of them have a dedicated deep enumerator.
 
 | Category | Services |
 |----------|----------|
-| Vector databases | Weaviate, ChromaDB, Qdrant, Milvus, Marqo, Manticore, SurrealDB, Infinity (InfiniFlow), Databend, GreptimeDB, Epsilla, OceanBase, Neo4j, Couchbase, Apache Solr, Meilisearch, Typesense, Vespa |
+| Vector databases | Weaviate, ChromaDB, Qdrant, Milvus, Marqo, Manticore, SurrealDB, Infinity, Databend, GreptimeDB, Epsilla, OceanBase, Neo4j, Couchbase, Apache Solr, Meilisearch, Typesense, Vespa |
 | LLM runtimes | Ollama, llama.cpp server, vLLM, SGLang, LocalAI, text-generation-webui |
 | RAG frameworks | AnythingLLM, LightRAG, PrivateGPT, txtai, Cognita, R2R, Kotaemon, Quivr, Danswer/Onyx, Verba, DocsGPT, Ragapp, Perplexica, RAGFlow |
 | Image generation | ComfyUI, AUTOMATIC1111 / SD WebUI, InvokeAI, Fooocus, SwarmUI |
@@ -128,46 +156,40 @@ Define new profiles in `port_classes.go`: one map entry, no other files touched.
 | Container / infra | etcd, Vault, Docker daemon, Kubernetes API, Consul, Portainer, Kubelet |
 | Service mesh | Kiali, Hubble UI, Linkerd Viz, Linkerd Proxy Admin, Cilium Metrics, Istio Envoy Admin, Istiod Debug, Pomerium |
 | Auth / policy | Open Policy Agent |
-| BI / Dashboard | Metabase, Apache Superset, Redash, Grafana |
+| BI / dashboard | Metabase, Apache Superset, Redash, Grafana |
 | Observability | Langfuse, Arize Phoenix, Helicone Self-Hosted, Lunary, OpenLIT, Pezzo, Prometheus |
 | Workflow automation | n8n |
 | Object storage | MinIO |
 | Analytical datastores | ClickHouse, Elasticsearch, Apache Pinot, ScyllaDB REST |
 | AI safety / eval | Promptfoo, NeMo Guardrails, DeepEval, LangSmith Self-Hosted, Inspect AI, Garak REST, Lakera Guard Self-Hosted, LLM Guard API |
-| Voice / Audio AI | Whisper ASR, Coqui XTTS, Piper TTS, RVC Voice Cloning, OpenVoice, ChatTTS, F5-TTS, Pipecat, Vocode, LiveKit Agents, AI TTS Server |
+| Voice / audio AI | Whisper ASR, Coqui XTTS, Piper TTS, RVC Voice Cloning, OpenVoice, ChatTTS, F5-TTS, Pipecat, Vocode, LiveKit Agents, AI TTS Server |
 | Medical AI / PACS | MONAI Label Server, Orthanc DICOM Server, dcm4che / dcm4chee-arc, DICOMweb (QIDO-RS) |
 | Notebooks / dev | Jupyter Notebook, Open Directory, Docker Registry |
 | Cross-cutting | Exposed API credentials (Langfuse, Helicone, Stripe, Anthropic, LangSmith, OpenRouter, Slack) |
 
-62 of the 218 services have dedicated deep enumerators. They surface:
+Deep enumerators pull:
+
 - PII fields in vector DB collections
 - Unauthenticated model execution surfaces
 - Exposed credentials in HTTP responses
 - Claimable admin states (unconfigured Metabase, Flowise credential panels)
 - Data counts, schema names, and experiment metadata
 
-## Performance
+# Performance
 
-The deep-enum stage is where the time goes: a vector store with hundreds of
-collections means hundreds of per-collection metadata reads. aimap runs those
-per-item reads **concurrently** with a bounded worker pool (the enum-heavy
-vendors — Qdrant, ChromaDB, Weaviate, Elasticsearch, ClickHouse — fan out their
-per-collection / per-class / per-index probes). Measured on a 157-host unauthenticated
-Qdrant population: **4:02 → 0:24, ~10x**, with identical findings.
+The deep-enum stage is where the time goes. A vector store with hundreds of collections means hundreds of per-collection metadata reads. aimap runs those reads concurrently with a bounded worker pool. Enum-heavy vendors (Qdrant, ChromaDB, Weaviate, Elasticsearch, ClickHouse) fan out their per-collection, per-class, and per-index probes. Measured on a 157-host unauthenticated Qdrant population: **4:02 to 0:24, about 10x**. Same findings.
 
-What we measured but did **not** find to be the lever (kept honest):
+What we measured and did not find to be the lever:
+
 - raising `-threads` (host-level concurrency): no change on enum-bound runs
-- a per-run GET response cache (`AIMAP_FETCH_CACHE=1`, opt-in): correct, ~8% fewer
-  requests, no wall-time change on its own
+- a per-run GET response cache (`AIMAP_FETCH_CACHE=1`, opt-in): correct, about 8% fewer requests, no wall-time change on its own
 - a no-phase-barrier per-host pipeline (`AIMAP_PIPELINE=1`, opt-in): no change on its own
 
-The bottleneck was the serial per-item loop inside the enumerators, not the
-orchestration. Parallelizing that loop is the speedup; the two opt-in flags are
-gated off by default and compose with it.
+The bottleneck was the serial per-item loop inside the enumerators, not the orchestration. Parallelizing that loop is the speedup. The two opt-in flags are gated off by default and compose with it.
 
-## JSON output shape
+# Output
 
-The `-o` flag writes a `ScanReport`:
+`-o` writes a `ScanReport`:
 
 ```
 tool            string
@@ -186,62 +208,31 @@ summary         {total_targets, open_ports, services_found, unauthenticated,
                     scan_duration}
 ```
 
-Risk levels: `critical`, `high`, `medium`, `low`, `info`. The escalation rule:
-`auth == none` + `high` finding = `critical`.
+Risk levels: `critical`, `high`, `medium`, `low`, `info`. Escalation rule: `auth == none` plus a `high` finding becomes `critical`. JSON is stable across releases.
 
-## Example
+# Adding a fingerprint
 
-```
-   █████╗ ██╗███╗   ███╗ █████╗ ██████╗
-  ██╔══██╗██║████╗ ████║██╔══██╗██╔══██╗
-  ███████║██║██╔████╔██║███████║██████╔╝
-  ██╔══██║██║██║╚██╔╝██║██╔══██║██╔═══╝
-  ██║  ██║██║██║ ╚═╝ ██║██║  ██║██║
-  ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝
-  AI Infrastructure Mapper v1.9.50
-  by NuClide
+1. Add a `Fingerprint` struct to `fingerprints.go`. Every probe carries `status_code` plus `json_field` or `body_contains` conjuncts. A naked single-word `body_contains` alone is unsound at population scale. False positives fire on blog posts and marketing pages that mention the product name.
+2. Optionally add an `enum<Service>` function to `enumerators.go` and wire it in `runEnumerators`.
 
-  PHASE 1: PORT DISCOVERY
-  ──────────────────────────────────────────────────────────
+# Companion tool: aimap-profile
 
-    Scanning 192.0.2.0/24 (256 hosts)
-    Ports: 80,443,3000,...
-    Threads: 20
+`aimap-profile/` is a single-file Python tool. Where aimap fingerprints services, aimap-profile profiles the target: identity, WHOIS, ASN, TLS, category (personal, institutional, commercial, research, honeypot), ethics flags (HIPAA exposure, CFAA exposure, safe harbor), PTR neighborhood, disclosure channels (security.txt, bounty programs, abuse contacts). Emits structured JSON for pipeline or LLM consumption.
 
-  PHASE 2: AI SERVICE FINGERPRINTING
+See [`aimap-profile/README.md`](aimap-profile/README.md).
 
-  PHASE 3: DEEP ENUMERATION
-```
+# Scope
 
-The terminal output is colorized. JSON is stable across releases.
+aimap does not authenticate to services, submit forms, POST data, execute exploits, or modify anything on a target. All probes are read-only HTTP GETs and TCP connects. It is an active scanner. It makes real connections. Only scan systems you own or have explicit written authorization to test.
 
-## Adding a fingerprint
+# Our other projects
 
-1. Add a `Fingerprint` struct to `fingerprints.go`. Every probe must carry at
-   least `status_code` + `json_field` or `body_contains` conjuncts. A naked
-   single-word `body_contains` alone is unsound at population scale: false
-   positives fire on blog posts and marketing pages that mention the product name.
-2. Optionally add an `enum<Service>` function to `enumerators.go` and wire it
-   in `runEnumerators`.
+- [VisorLog](https://github.com/nuclide-research/visorlog) — finding ledger and ingest pipeline for AI-infra reports
+- [VisorGraph](https://github.com/nuclide-research/visorgraph) — cert-pivot to operator attribution
+- [tiptoe](https://github.com/nuclide-research/tiptoe) — quiet, congestion-controlled assessment for AI infrastructure
+- [BARE](https://github.com/nuclide-research/BARE) — semantic exploit-module ranking over scanner findings
+- [recongraph](https://github.com/nuclide-research/recongraph) — typed provenance graph for multi-source recon
 
-## Companion tool: aimap-profile
-
-`aimap-profile/` is a single-file Python tool. Where aimap fingerprints services,
-aimap-profile profiles the target: identity, WHOIS, ASN, TLS, category
-(personal / institutional / commercial / research / honeypot), ethics flags
-(HIPAA? CFAA exposure? safe harbor?), PTR neighborhood, and disclosure channels
-(security.txt, bounty programs, abuse contacts). Emits structured JSON for
-pipeline or LLM consumption.
-
-See `aimap-profile/README.md` for details.
-
-## What aimap is not
-
-aimap does not authenticate to services, submit forms, POST data, execute
-exploits, or modify anything on a target. All probes are read-only HTTP GETs and
-TCP connects. It is active: it makes real connections. Only scan systems you own
-or have explicit written authorization to test.
-
-## License
+# License
 
 MIT. Part of the NuClide toolchain. Contact: [nuclide-research.com](https://nuclide-research.com)
