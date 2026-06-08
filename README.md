@@ -2,23 +2,6 @@
 
 Fingerprint AI/ML infrastructure at population scale and enumerate what is exposed inside.
 
-aimap is a single Go binary that TCP-connects to a target's open ports, matches
-each response against a 218-fingerprint database of AI and ML services, then
-runs up to 62 dedicated deep enumerators that pull collections, model lists,
-experiment data, credentials in HTTP responses, claimable admin states, and PII
-fields from whatever service answers. Three phases: port discovery, fingerprint
-matching, deep enumeration. The deep enumerators fetch per-collection /
-per-class / per-index data **concurrently** (bounded), so enum-heavy hosts — an
-unauth Qdrant with hundreds of collections — finish in seconds instead of
-minutes (see Performance). The result is a JSON report shaped to feed directly
-into `visorlog ingest`, `winnow`, and SIEM pipelines.
-
-We built aimap because generic scanners (nmap, nuclei) see an open port and stop.
-They do not know that the Ollama on port 11434 exposes every model it holds, that
-the Flowise on port 3000 stores OpenAI keys in its credentials panel, or that the
-Jupyter on port 8888 has no token. aimap knows all of those things and surfaces
-them in a single pass.
-
 ## Screenshots
 
 **Phase 2 — AI service fingerprinting**
@@ -146,24 +129,7 @@ Define new profiles in `port_classes.go`: one map entry, no other files touched.
 - Claimable admin states (unconfigured Metabase, Flowise credential panels)
 - Data counts, schema names, and experiment metadata
 
-## Performance
 
-The deep-enum stage is where the time goes: a vector store with hundreds of
-collections means hundreds of per-collection metadata reads. aimap runs those
-per-item reads **concurrently** with a bounded worker pool (the enum-heavy
-vendors — Qdrant, ChromaDB, Weaviate, Elasticsearch, ClickHouse — fan out their
-per-collection / per-class / per-index probes). Measured on a 157-host unauthenticated
-Qdrant population: **4:02 → 0:24, ~10x**, with identical findings.
-
-What we measured but did **not** find to be the lever (kept honest):
-- raising `-threads` (host-level concurrency): no change on enum-bound runs
-- a per-run GET response cache (`AIMAP_FETCH_CACHE=1`, opt-in): correct, ~8% fewer
-  requests, no wall-time change on its own
-- a no-phase-barrier per-host pipeline (`AIMAP_PIPELINE=1`, opt-in): no change on its own
-
-The bottleneck was the serial per-item loop inside the enumerators, not the
-orchestration. Parallelizing that loop is the speedup; the two opt-in flags are
-gated off by default and compose with it.
 
 ## JSON output shape
 
@@ -212,36 +178,3 @@ Risk levels: `critical`, `high`, `medium`, `low`, `info`. The escalation rule:
 
   PHASE 3: DEEP ENUMERATION
 ```
-
-The terminal output is colorized. JSON is stable across releases.
-
-## Adding a fingerprint
-
-1. Add a `Fingerprint` struct to `fingerprints.go`. Every probe must carry at
-   least `status_code` + `json_field` or `body_contains` conjuncts. A naked
-   single-word `body_contains` alone is unsound at population scale: false
-   positives fire on blog posts and marketing pages that mention the product name.
-2. Optionally add an `enum<Service>` function to `enumerators.go` and wire it
-   in `runEnumerators`.
-
-## Companion tool: aimap-profile
-
-`aimap-profile/` is a single-file Python tool. Where aimap fingerprints services,
-aimap-profile profiles the target: identity, WHOIS, ASN, TLS, category
-(personal / institutional / commercial / research / honeypot), ethics flags
-(HIPAA? CFAA exposure? safe harbor?), PTR neighborhood, and disclosure channels
-(security.txt, bounty programs, abuse contacts). Emits structured JSON for
-pipeline or LLM consumption.
-
-See `aimap-profile/README.md` for details.
-
-## What aimap is not
-
-aimap does not authenticate to services, submit forms, POST data, execute
-exploits, or modify anything on a target. All probes are read-only HTTP GETs and
-TCP connects. It is active: it makes real connections. Only scan systems you own
-or have explicit written authorization to test.
-
-## License
-
-MIT. Part of the NuClide toolchain. Contact: [nuclide-research.com](https://nuclide-research.com)
