@@ -357,13 +357,47 @@ var Fingerprints = []Fingerprint{
 	},
 
 	// LMDeploy — InternLM/Shanghai AI Lab serving engine. Port 23333 is
-	// LMDeploy-exclusive. owned_by:"lmdeploy" in /v1/models; /update_weights
-	// allows unauth model weight updates; /terminate allows unauth server
-	// shutdown; /distserve/* exposes distributed serving topology. Auth tier A*.
+	// LMDeploy-exclusive (api_server.py:1432, server_port default 23333).
+	// auth_default=none: api_keys parameter Default to None (api_server.py:1486)
+	// — Swagger UI mounted at docs_url='/' (api_server.py:1543), /openapi.json
+	// publicly enumerates every route. owned_by:"lmdeploy" in /v1/models;
+	// /update_weights, /terminate, /sleep, /wakeup, /distserve/* exposed.
+	//
+	// Hardening (2026-06-09, Lane 5): the bare body_contains:"lmdeploy" probe
+	// was an Insight #6-class single-keyword match. Anchored on the unique
+	// route family /distserve/engine_info + /v1/encode + /is_sleeping +
+	// /v1/chat/interactive — none of which appear in vLLM, SGLang, TGI, or
+	// AIBrix openapi.json. The /openapi.json probe requires status_code:200
+	// AND all three distinctive route strings to fire — IAP HTML walls (CVAT-FP
+	// class, reference_aimap_cvat_iap_fp) cannot satisfy three substring
+	// conditions on a single response body. Tome source: ~/tome/platforms/lmdeploy.json.
+	//
+	// Cat-LMDeploy Lane B hardening (2026-06-10): added /v1/encode as a third
+	// conjunctive anchor on /openapi.json, taking the matcher to the tome's
+	// recommended "at least 2 of N" floor + 1. Three independent LMDeploy-
+	// unique route names co-occurring in a single openapi.json document is a
+	// near-zero-FP signal. DefaultPorts kept at {23333,8000,80} pending Lane A
+	// cross-corpus port distribution check (tome canonical = [23333] only;
+	// 8000/80 carry the FastAPI default convention and may be drift).
 	{
 		Name:         "LMDeploy",
 		DefaultPorts: []int{23333, 8000, 80},
 		Probes: []Probe{
+			// Primary: /openapi.json route-name anchor — LMDeploy-unique distserve
+			// + chat-interactive + encode route family. Conjunctive match across
+			// three unique strings inside a single JSON document rejects substrate
+			// noise (Insight #6 + Cat-Tabby Tabby FP hardening pattern 2026-06-09).
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "/distserve/engine_info"},
+				{Type: "body_contains", Value: "/v1/chat/interactive"},
+				{Type: "body_contains", Value: "/v1/encode"},
+			}},
+			// Fallback: /v1/models — kept for non-Swagger deploys but anchored
+			// on data field shape AND owned_by:"lmdeploy". owned_by:"lmdeploy"
+			// is hardcoded in api_server.py model_card construction, so the
+			// keyword is structurally bound to the JSON model object, not the
+			// page HTML.
 			{Path: "/v1/models", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "data"},
@@ -371,6 +405,101 @@ var Fingerprints = []Fingerprint{
 			}},
 		},
 		Severity: "medium",
+	},
+
+	// AIBrix — ByteDance K8s-native vLLM control plane on Envoy Gateway.
+	// auth_default=none (quickstart literally curls http://${ENDPOINT}/v1/completions
+	// with no auth). Default LoadBalancer on port 80; aibrix-runtime sidecar
+	// on 8080; vLLM backend on 8000 reachable directly when Service is
+	// LoadBalancer instead of ClusterIP. Tome source: ~/tome/platforms/aibrix.json
+	// (sha 0d0ff153b2fd82dbdcafc23721fef50656fb6d24).
+	//
+	// FP-discipline: the gateway is just Envoy, so a bare "envoy" header would
+	// match every Envoy in the world. The k8s label namespace model.aibrix.ai
+	// is the AIBrix-unique tell — it is a string that only appears in
+	// aibrix-system-controlled responses (HTTPRoute resource references, label
+	// echoes, gateway plugin error bodies). Anchored on body_contains of the
+	// label namespace AND a structured signal (Envoy server header or vLLM-shape
+	// /v1/models response) to reject blog/docs pages.
+	{
+		Name:         "AIBrix",
+		DefaultPorts: []int{80, 8000, 8080},
+		Probes: []Probe{
+			// Primary: /v1/models gateway aggregator response — vLLM-shape JSON
+			// (data array) PLUS the model.aibrix.ai label string appearing in
+			// the gateway-aggregated payload PLUS Envoy server header. Triple
+			// anchor rejects (1) standalone vLLM (no aibrix label), (2) generic
+			// Envoy proxies (no /v1/models), and (3) marketing pages mentioning
+			// aibrix (no Envoy header on a /v1/models JSON response).
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "model.aibrix.ai"},
+				{Type: "header_contains", Field: "Server", Value: "envoy"},
+			}},
+			// Fallback: /healthz on aibrix-runtime sidecar (port 8080) — the
+			// runtime sidecar response embeds aibrix-system namespace strings
+			// in error/info paths. Anchored on body_contains of the namespace
+			// AND status_code:200 AND aibrix-runtime header tell.
+			{Path: "/healthz", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "aibrix"},
+				{Type: "header_contains", Field: "Server", Value: "envoy"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// RTP-LLM — Alibaba havenask LLM serving engine. Default START_PORT=8088
+	// (py_config_modules.py:36, DEFAULT_START_PORT). auth_default=none:
+	// FastAPI app receives only CORSMiddleware, no AuthenticationMiddleware
+	// (frontend_app.py:166-175). /worker_status discloses dp_size, tp_size,
+	// role, running task list, cache utilization; /set_log_level,
+	// /update_scheduler_info, /start_profile are anonymous-mutate surfaces.
+	// Tome source: ~/tome/platforms/rtp-llm.json (sha b0c09a3440f7df0dce8d682ae4383d741809bb56).
+	//
+	// FP-discipline: port 8088 is also http-alt and admin-panel territory,
+	// so port presence alone is high-FP. The havenask service-mesh route
+	// aliasing (/GraphService/cm2_status, /SearchService/cm2_status) is the
+	// single most distinctive tell — these route names are reused from
+	// Alibaba's open-source havenask search engine, and no other LLM serving
+	// stack carries them. The frontend_concurrency_limit + dp_size key
+	// co-occurrence on /worker_status is structurally bound to RTP-LLM's
+	// frontend+backend split (frontend adds frontend_*, backend gRPC adds
+	// dp_size/tp_size) — neither key alone is unique, the combination is.
+	{
+		Name:         "RTP-LLM",
+		DefaultPorts: []int{8088, 8089, 8090, 8092},
+		Probes: []Probe{
+			// Primary: /worker_status — two co-occurring JSON keys whose
+			// combination is RTP-LLM unique per source review. dp_size alone
+			// would FP on Ray/Dask telemetry; frontend_concurrency_limit alone
+			// could FP on generic FastAPI middleware boilerplate. Together
+			// they require both the frontend layer AND the rtp-llm backend.
+			{Path: "/worker_status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "frontend_available_concurrency"},
+				{Type: "body_contains", Value: "dp_size"},
+			}},
+			// Fallback: /cache_status — same frontend_* key plus
+			// available_kv_cache (KV-cache telemetry is LLM-serving specific;
+			// the frontend prefix is RTP-LLM specific). Conjunctive match.
+			{Path: "/cache_status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "available_kv_cache"},
+				{Type: "body_contains", Value: "frontend_available_concurrency"},
+			}},
+			// Tertiary: havenask service-mesh path returning "ok" — confirms
+			// Alibaba search-stack lineage even when LLM-specific endpoints
+			// are filtered. Anchored on status_code:200 AND the unique path
+			// itself; the body "ok" is short but the path name is the load
+			// bearer here.
+			{Path: "/GraphService/cm2_status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "ok"},
+			}},
+		},
+		Severity: "high",
 	},
 
 	// GPT4All — local LLM desktop app (Nomic AI), port 4891 (exclusive).
@@ -1762,6 +1891,16 @@ var Fingerprints = []Fingerprint{
 				{Type: "json_field", Field: "data"},
 				{Type: "body_contains", Value: "litellm_params"},
 			}},
+			// Swagger UI at root — catches AUTH-PROTECTED LiteLLM deployments
+			// where /health and /model/info correctly require keys (401/403)
+			// but the OpenAPI docs leak at /. Observed 2026-06-07 on 3 hosts
+			// in the 06-01 litellm-title corpus (18.236.39.160, 80.241.215.47:4000,
+			// 89.167.90.181:4000). The title string "LiteLLM API - Swagger UI"
+			// is LiteLLM-emitted (proxy_server.py) and product-unique enough.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "LiteLLM API - Swagger UI"},
+			}},
 		},
 		Severity: "medium",
 	},
@@ -1988,7 +2127,7 @@ var Fingerprints = []Fingerprint{
 	},
 	{
 		Name:         "BentoML",
-		DefaultPorts: []int{3000, 80, 443},
+		DefaultPorts: []int{3000, 80, 443, 8080},
 		Probes: []Probe{
 			{Path: "/docs.json", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
@@ -1999,8 +2138,31 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "BentoML"},
 			}},
+			{Path: "/healthz", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "BentoML"},
+			}},
 		},
-		Severity: "medium",
+		Severity: "high",
+	},
+	{
+		// Yatai: BentoML's K8s operator + admin dashboard (github.com/bentoml/Yatai).
+		// Admin panel on :8080; /setup?token= is a first-admin-claim surface
+		// (YATAI_INITIALIZATION_TOKEN, 16-char alphanum, exposed if Ingress unprotected).
+		// /api/v1/api_tokens returns token list; /api/v1/deployments lists bento deployments.
+		Name:         "Yatai (BentoML K8s Admin)",
+		DefaultPorts: []int{8080},
+		Probes: []Probe{
+			{Path: "/api/v1/api_tokens", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+			}},
+			{Path: "/api/v1/deployments", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "total"},
+			}},
+		},
+		Severity: "critical",
 	},
 	{
 		Name:         "Ray Dashboard",
@@ -2668,6 +2830,49 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "json_field", Field: "autocomplete"},
 				{Type: "body_contains", Value: "status"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Tabby (TabbyML) self-hosted AI code-completion server.
+		// Two-probe identity:
+		//   /v1/health returns HealthState JSON shape unauthenticated
+		//   on every version: {"model","chat_model","device","webserver",...}.
+		//   The "chat_model" + "webserver" field pair is Tabby-unique
+		//   (no other AI service emits the two together at /v1/health).
+		//   Anchored on json_field per Insight #6 marker discipline.
+		//   /auth/signin (v0.11.0+) returns the login HTML with the
+		//   "<title>Tabby" prefix; conjoined with status_code 200 to
+		//   suppress 404-on-pre-v0.11.0 hosts (those have NO webserver
+		//   so /v1/health is the only identity probe). Population port
+		//   set derived from 2026-06-09 cohort (97 Shodan title hits):
+		//   :9090 dominates (40/94), then :8000 (11), :443 (8), :80 (7),
+		//   :9000 (6), :8080 (5), :9999 + :8010 + :12399 long tail.
+		//   Squad-1 brief mistakenly fixated on :8080 — the real
+		//   default is :9090 once webserver is enabled.
+		Name:         "Tabby (TabbyML)",
+		DefaultPorts: []int{9090, 8080, 8000, 443, 80, 9000, 9999, 8443},
+		Probes: []Probe{
+			{Path: "/v1/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "chat_model"},
+				{Type: "json_field", Field: "webserver"},
+			}},
+			{Path: "/auth/signin", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "<title>Tabby"},
+				// FP-hardening 2026-06-09 (Lane-B): VPN-exit response-
+				// rewriting layer was injecting "<title>Tabby" into
+				// unrelated hosts' /auth/signin (22-byte stub bodies),
+				// producing 66 FPs in the Cat-Tabby cohort. Real Tabby
+				// is a Next.js SPA emitting webpack chunks; the mimicry
+				// did not. Anchor on the Next.js webpack chunk path
+				// (unique to real Tabby v0.11.0+ builds) and the Tabby-
+				// application-route signin page chunk (even stricter).
+				// Per Insight #6: never naked single-token body_contains.
+				{Type: "body_contains", Value: "/_next/static/chunks/webpack-"},
+				{Type: "body_contains", Value: "app/auth/signin/page-"},
 			}},
 		},
 		Severity: "high",
@@ -4902,6 +5107,235 @@ var Fingerprints = []Fingerprint{
 			}},
 		},
 		Severity: "medium",
+	},
+	{
+		// Sluice — AI-generated email guardrails SaaS. Sits between AI agents
+		// and recipients, scans outbound LLM-drafted email for PII / tone /
+		// prompt-injection-echo / hallucination / policy violations / etc.
+		// before delivery. Single-VM Docker Compose (Haraka MTA + Next.js +
+		// nginx) on Hetzner Helsinki. Opens a new NuClide subcategory:
+		// AI-Email-Guardrails (siblings: AegisAI, Prompt Security email
+		// connectors, BeeSafe AI, Salus). Hardened auth-on-default posture.
+		// Operator: sluice.email, registered 2026-03-11 via Ascio DK.
+		// Probe anchors: brand <title>Sluice AND meta description
+		// "AI email safety layer" (brand alone is too generic — sluice gate,
+		// sluice box). The combined string identifies the SaaS instance.
+		Name:         "Sluice",
+		DefaultPorts: []int{443, 80, 587, 465},
+		Probes: []Probe{
+			// /login is the canonical landing for the Next.js app (root 307s
+			// here for unauthed users). It renders the brand title + meta tag.
+			{Path: "/login", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "<title>Sluice"},
+				{Type: "body_contains", Value: "AI email safety layer"},
+			}},
+		},
+		Severity: "info",
+	},
+	// ── Cat-X ROS / Robotics (added 2026-06-09, Lane B scaffolding) ─────
+	// Six fingerprints for the ROS ecosystem. Master brief:
+	// AI-LLM-Infrastructure-OSINT/data/platform-intel/cat-x-ros-osint-2026-06-09.md
+	// Academic anchor: Brown et al. 2018 (arxiv:1808.03322) — 100+ rosmasters
+	// in a single IPv4 scan, 70%+ on .edu. NuClide 2026 survey is the 8-year
+	// follow-up. Auth-on-default tier: ALL Tier-A (structural, no auth shipped).
+	{
+		// Foxglove bridge — self-hosted WebSocket bridge serving ROS/ROS2 topic
+		// graphs to the Foxglove Studio visualization client. Default 8765.
+		// Master brief §"aimap fingerprint debt" #5.
+		//
+		// Detection vector: WebSocket upgrade with subprotocol
+		// `Sec-WebSocket-Protocol: foxglove.websocket.v1`. The aimap matcher
+		// is GET-only over TCP — we cannot do a WS handshake here, so the
+		// fingerprint observes the bare GET / response which most foxglove_bridge
+		// builds answer with HTTP 426 Upgrade Required + a `Sec-WebSocket-Protocol`
+		// hint header on advertised builds (this is the build-artifact-class
+		// anchor per Insight #93 — the subprotocol identifier IS the build
+		// artifact baked into the WebSocket handshake server). Conjunctive
+		// per Insight #6: status_code + header_contains.
+		//
+		// Active confirmation (Lane C scope): WS upgrade and read serverInfo
+		// frame from /listChannels — out of aimap's TCP-GET engine.
+		Name:         "Foxglove bridge",
+		DefaultPorts: []int{8765, 8766},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "426"},
+				{Type: "header_contains", Field: "Sec-WebSocket-Protocol", Value: "foxglove.websocket.v1"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// Jupyter-on-Jetson — Jupyter Notebook / Lab on NVIDIA Jetson boards
+		// (JetBot, classroom kits, Isaac ROS Dev images). Master brief
+		// §"aimap fingerprint debt" #6.
+		//
+		// Insight #40 watchpoint: JetPack 6 (2024) flipped Jupyter token-on-by-
+		// default at first boot. Exposed cohort skews JetPack 4/5 + classroom
+		// images that ship with token disabled. Conjunctive marker pairs Jupyter's
+		// generic `Jupyter` body marker with a Jetson-identity marker (`JetBot` /
+		// `L4T` / `jetson`) per Insight #6 — neither alone is sound at population
+		// scale (Jupyter is common; `jetson` is a generic word).
+		//
+		// Three probes — one per Jetson-identity marker — to express the OR
+		// disjunction within the matcher's conjunctive-Match[] engine. Each
+		// fires independently; the first match wins.
+		//
+		// Operator attribution: reuse the existing aimap Docker-registry
+		// classifier `classifyJetsonRepos` (enumerators.go:1373). When this
+		// fingerprint fires on :8888 and :5000 also resolves to a Docker
+		// registry on the same host, the classifier surfaces the Jetson stack
+		// from /v2/_catalog without rebuilding here.
+		Name:         "Jupyter-on-Jetson",
+		DefaultPorts: []int{8888, 8889},
+		Probes: []Probe{
+			{Path: "/tree?", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Jupyter"},
+				{Type: "body_contains", Value: "JetBot"},
+			}},
+			{Path: "/tree?", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Jupyter"},
+				{Type: "body_contains", Value: "L4T"},
+			}},
+			{Path: "/tree?", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Jupyter"},
+				{Type: "body_contains", Value: "jetson"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// ROS2 DDS — Data Distribution Service (RTPS protocol). Master brief
+		// §"aimap fingerprint debt" #3.
+		//
+		// DETECTION GAP: RTPS is binary-over-UDP. The aimap matcher engine is
+		// HTTP/GET-over-TCP only. This fingerprint is REGISTERED as a placeholder
+		// with no satisfiable HTTP probe so the platform appears in catalog
+		// listings (-show-fingerprints output, future tome reconciliation), but
+		// detection during a live scan must come from the UDP scanner side or
+		// from the Lane C aztarna reuse path.
+		//
+		// Real-world detection requires:
+		//   - UDP probe to 7400-7415 sending an RTPS PARTICIPANT_ANNOUNCE shape
+		//   - Match on RTPS magic header `RTPS\x02\x01\x01\x01` at byte 0 of
+		//     the response (build-artifact anchor per Insight #93 — protocol
+		//     magic bytes are the build artifact baked into the wire format)
+		//
+		// Lane C reuse: Alias Robotics `aztarna` already implements DDS
+		// PARTICIPANT_ANNOUNCE + DCPS enumeration. Do not rebuild — call out
+		// to aztarna from the verify stage.
+		//
+		// Severity: high (LAN-only typical deployment; SROS2 opt-in rarely on).
+		// Probes intentionally empty: the matcher will not fire this FP on
+		// HTTP/HTTPS traffic, preventing FPs against arbitrary 7400-7415 web
+		// servers. The fingerprint exists to keep the platform registered.
+		Name:         "ROS2 DDS",
+		DefaultPorts: []int{7400, 7401, 7410, 7411, 7412, 7413, 7414, 7415},
+		Probes:       []Probe{},
+		Severity:     "high",
+	},
+	{
+		// rosbridge_server — ROS1 WebSocket bridge (Tornado-based) serving
+		// /rosapi/topics, /rosapi/services, /rosapi/nodes over WS. Master
+		// brief §"aimap fingerprint debt" #2. Tier-A for 16 years.
+		//
+		// Detection vector: rosbridge_server runs on Python Tornado. GET / over
+		// the same port returns either 404 Not Found or 405 Method Not Allowed
+		// with `Server: TornadoServer/X.Y.Z` header. The Tornado server header
+		// alone is generic (many Python services use Tornado) — conjunctive per
+		// Insight #6: anchor to the default-port set (9090 is rosbridge-canonical;
+		// not a common Tornado default) AND the Server header AND the 404/405
+		// status. Two probes cover both status shapes.
+		//
+		// Build-artifact anchor (Insight #93): the canonical rosbridge_suite
+		// rosbridge_server binary embeds Tornado as its only HTTP responder.
+		// Server: TornadoServer + port 9090 + 404/405 with no body content is
+		// the tuple. The full discriminator is the WebSocket handshake to /
+		// expecting `{"op":"service_response","service":"/rosapi/topics",...}`
+		// after sending `{"op":"call_service","service":"/rosapi/topics","args":{}}`
+		// — that path is Lane C verify scope (out of aimap GET engine).
+		Name:         "rosbridge_server",
+		DefaultPorts: []int{9090, 9091},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "404"},
+				{Type: "header_contains", Field: "Server", Value: "TornadoServer"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "405"},
+				{Type: "header_contains", Field: "Server", Value: "TornadoServer"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// rosmaster — ROS1 master node (XML-RPC on port 11311). Master brief
+		// §"aimap fingerprint debt" #1. Tier-A — "trusts all nodes."
+		//
+		// Detection vector: rosmaster speaks XML-RPC over POST only. The aimap
+		// matcher is GET-only. Python's SimpleXMLRPCServer (the rosmaster HTTP
+		// layer) responds to GET / with HTTP 501 "Unsupported method ('GET')"
+		// and a `Server: BaseHTTP/X.Y Python/X.Y.Z` header + a recognizable
+		// XML body fragment. The conjunctive marker pair is:
+		//   - status_code 501
+		//   - Server header containing BaseHTTP (Python stdlib HTTP server)
+		//   - body containing "Unsupported method ('GET')" (Python SimpleXMLRPCServer
+		//     literal error string — the build-artifact-class anchor per
+		//     Insight #93)
+		//
+		// Full discriminator (Lane C verify scope, requires POST):
+		//   POST / with XML-RPC <methodCall><methodName>getUri</methodName>...
+		//   → expect <methodResponse><value>1</value>... success code
+		// Brown 2018 used getSystemState — same access pattern, returns the full
+		// topic/service graph. POST is out of aimap's GET-only matcher engine.
+		//
+		// FP risk: the conjunctive triple is unique enough at port 11311 that
+		// generic Python services would not collide (they would not be on 11311).
+		// Adding `body_contains "Unsupported method"` keeps this anchored should
+		// rosmaster ever be re-bound to a non-default port via -scan-all-fingerprints.
+		Name:         "rosmaster",
+		DefaultPorts: []int{11311, 11315, 11316},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "501"},
+				{Type: "header_contains", Field: "Server", Value: "BaseHTTP"},
+				{Type: "body_contains", Value: "Unsupported method"},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// web_video_server — ROS package serving robot camera topics as
+		// MJPEG/H264 streams over HTTP. Master brief §"aimap fingerprint
+		// debt" #4. Auth knob has never shipped.
+		//
+		// Detection vector: GET / returns a hard-coded HTML page listing
+		// streamable topics. The HTML literal "ROS Streamable Topic List"
+		// (in <title> and <h1>) plus the link prefix "/stream?topic=" are
+		// the build-artifact-class anchors per Insight #93 — both are
+		// hard-coded in web_video_server/src/web_video_server.cpp and have
+		// not shifted across releases. Conjunctive per Insight #6:
+		// status_code + both HTML literals.
+		//
+		// Restraint posture (Lane D Squad-3 Option A): topic NAMES are the
+		// finding. Do NOT GET /stream?topic=... — that pulls live frames
+		// and creates chain-of-evidence problems. The fingerprint matches
+		// on the topic-list page only; deep enumeration parses topic names
+		// from the same HTML, never the stream.
+		Name:         "web_video_server",
+		DefaultPorts: []int{8080, 8181, 8000, 8888},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "ROS Streamable Topic List"},
+				{Type: "body_contains", Value: "/stream?topic="},
+			}},
+		},
+		Severity: "high",
 	},
 }
 
