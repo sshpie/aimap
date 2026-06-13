@@ -108,6 +108,9 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	// Data labeling / annotation
 	"Argilla": enumArgilla,
 
+	// LLM-app / RAG builders (Cat-34)
+	"Vanna": enumVanna,
+
 	// Orchestration / UI
 	"Flowise":     enumFlowise,
 	"Dify":        enumDify,
@@ -647,6 +650,52 @@ func enumQdrant(c *http.Client, svc ServiceMatch) EnumResult {
 	if st, _, body, err := httpGET(c, b+"/cluster"); err == nil && st == 200 {
 		if m, err := parseJSON(body); err == nil {
 			r.RawData["cluster"] = m
+		}
+	}
+
+	return r
+}
+
+// ── Vanna (text-to-SQL agent, Cat-34) ───────────────────────────────
+//
+// RESTRAINT: reads only the app-identity config endpoint and the root UI.
+// Does NOT call /api/v0/run_sql, /api/v0/generate_sql, or
+// /api/v0/get_training_data — those are the exec / data-exfil primitives and
+// are left unexercised by policy. Confirming auth posture is enough.
+func enumVanna(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// classic vanna-flask: /api/v0/get_config returns app metadata only
+	// (title / logo / version), never user data.
+	if st, _, body, err := httpGET(c, b+"/api/v0/get_config"); err == nil {
+		if st == 200 && strings.Contains(strings.ToLower(string(body)), "vanna") {
+			r.AuthStatus = "none"
+			r.Details = append(r.Details, "config endpoint open (/api/v0/get_config)")
+			r.Findings = append(r.Findings, Finding{
+				Category: "exec-surface",
+				Title:    "Vanna API unauthenticated — text-to-SQL exec surface exposed",
+				Detail:   "Vanna ships NoAuth() by default; /api/v0/run_sql and /api/v0/generate_sql execute against the connected DB. Surface confirmed open; exec NOT exercised (restraint). Confirm connected-DB scope.",
+				Severity: "high",
+			})
+		} else if st == 401 || st == 403 {
+			r.AuthStatus = fmt.Sprintf("required (HTTP %d)", st)
+		}
+	}
+
+	// newer "Vanna Agents Chat" variant has no /api/v0/get_config; confirm
+	// via the open root UI (vendor-unique img.vanna.ai marker).
+	if r.AuthStatus == "unknown" {
+		if st, _, body, err := httpGET(c, b+"/"); err == nil && st == 200 && strings.Contains(string(body), "img.vanna.ai") {
+			r.AuthStatus = "none (UI open)"
+			r.Details = append(r.Details, "Vanna Agents UI open (root 200, no auth gate)")
+			r.Findings = append(r.Findings, Finding{
+				Category: "exec-surface",
+				Title:    "Vanna Agents UI unauthenticated",
+				Detail:   "Agents-Chat variant; UI loads without an auth gate. SQL-exec API present, not exercised (restraint).",
+				Severity: "high",
+			})
 		}
 	}
 

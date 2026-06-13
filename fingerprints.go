@@ -45,6 +45,21 @@ type Fingerprint struct {
 // ── Fingerprint database ────────────────────────────────────────────
 
 var Fingerprints = []Fingerprint{
+	// ── LLM-app / RAG builders (Cat-34) ─────────────────────────
+	{
+		Name:         "Vanna",
+		DefaultPorts: []int{8000, 8001, 8010, 8080, 8084, 5000, 3000},
+		Probes: []Probe{
+			// Cross-variant: both classic vanna-flask (vanna-flask.svg) and the
+			// newer "Vanna Agents Chat" UI embed the vendor-unique img.vanna.ai
+			// CDN. Anchored to status_code per the naked-keyword lesson.
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "img.vanna.ai"},
+			}},
+		},
+		Severity: "high",
+	},
 	// ── Vector databases ────────────────────────────────────────
 	{
 		Name:         "Weaviate",
@@ -745,7 +760,7 @@ var Fingerprints = []Fingerprint{
 		// The PyPI package token "goldenverba" appears in the bundle and is
 		// highly distinctive — safe single anchor.
 		Name:         "Verba",
-		DefaultPorts: []int{8000},
+		DefaultPorts: []int{8000, 8080, 8888},
 		Probes: []Probe{
 			{Path: "/", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
