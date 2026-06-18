@@ -632,16 +632,199 @@ var Fingerprints = []Fingerprint{
 		// LightRAG — GraphRAG server, port 9621 (LightRAG-exclusive).
 		// Auth off by default; /health is always unauthenticated and the
 		// Ollama-compat endpoints stay open even with API-key auth on.
+		//
+		// HARDENED 2026-06-17 (Cat RAG-framework-server survey). The old
+		// fingerprint was status_code:200 + a single body_contains:"LightRAG"
+		// on /docs and /. That naked title-keyword shape is the catchall-200
+		// FP class (cf. the aimap CVAT fingerprint firing on transient GCP IAP
+		// 200s, and the dcm4chee ASP.NET catchall echo): a reverse-proxy that
+		// reflects the brand string, or a renamed WebUI whose /docs title is
+		// preserved, satisfies it. Re-anchored on the /health JSON contract.
+		//
+		// /health on a real LightRAG server returns a JSON object carrying the
+		// pair core_version + webui_title (LightRAG-specific build/UI keys) plus
+		// status:"healthy". The core_version + webui_title CONJUNCTION is the
+		// marker anchor — no generic health endpoint emits BOTH keys (Insight #6).
 		Name:         "LightRAG",
-		DefaultPorts: []int{9621},
+		DefaultPorts: []int{9621, 80, 443, 8000},
 		Probes: []Probe{
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "core_version"},        // LightRAG build-version key
+				{Type: "json_field", Field: "webui_title"},         // LightRAG WebUI key — pair defeats renamed-UI FP
+				{Type: "body_contains", Value: `"status":"healthy"`}, // value-gate (json_field is presence-only)
+			}},
+			// NOTE: auth_mode is a VALUE the engine cannot decode at the
+			// fingerprint layer — MatchCond has no value-equality type, only
+			// json_field (presence) + body_contains (substring). This probe
+			// does NOT branch on auth_mode; open-vs-auth determination
+			// (auth_mode=="disabled" => open, "enabled" => auth-on) MUST be
+			// made downstream by a LightRAG deep enumerator reading the same
+			// /health body into EnumResult.AuthStatus. Wiring that enumerator
+			// (enumeratorRegistry["LightRAG"]) is the follow-on; it is NOT
+			// required for detection. Fingerprint stops at identity.
+			//
+			// Fallback for older builds whose /health predates webui_title:
+			// /docs Swagger title gated on the real swagger-ui marker so the
+			// lone brand keyword is never the only condition (anti catchall-200).
 			{Path: "/docs", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "LightRAG"},
+				{Type: "body_contains", Value: "swagger-ui"}, // anchor: real Swagger doc page, not a brand reflection
 			}},
-			{Path: "/", Matches: []MatchCond{
+		},
+		Severity: "high",
+	},
+	{
+		// llama_deploy apiserver — LlamaIndex agent control plane / rag-framework
+		// server, port 4501 (llama_deploy-exclusive). Added 2026-06-17
+		// (Cat RAG-framework-server survey).
+		//
+		// /status on a real apiserver returns a JSON object with the triple
+		// max_deployments (numeric quota) + deployments (an object/array of
+		// live deployments) + status:"healthy". That conjunction is unique to
+		// llama_deploy — no generic /status emits max_deployments. Identity is
+		// the structured-field set, not a brand keyword (Insight #6).
+		//
+		// NOTE: the spec asks for `deployments` as a JSON ARRAY, but json_array
+		// tests the WHOLE BODY (parseJSONArray on body), not a field — and the
+		// body here is a top-level OBJECT, so json_array would FAIL. There is no
+		// "field-is-array" MatchCond in the vocabulary. Closest expressible
+		// equivalent: json_field "deployments" (presence) + body_contains
+		// `"deployments"` is redundant with presence, so the array-shape
+		// constraint is dropped to "deployments key present". max_deployments
+		// being numeric likewise cannot be type-checked (json_field is
+		// presence-only); its mere presence already discriminates.
+		Name:         "llama_deploy apiserver",
+		DefaultPorts: []int{4501, 80, 443},
+		Probes: []Probe{
+			{Path: "/status", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
-				{Type: "body_contains", Value: "LightRAG"},
+				{Type: "json_field", Field: "max_deployments"},      // llama_deploy quota key — unique to apiserver
+				{Type: "json_field", Field: "deployments"},          // deployments map/array (presence only)
+				{Type: "body_contains", Value: `"status":"healthy"`}, // value-gate; nested-value equality unavailable
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// LlamaIndex Server (create-llama) — rag-framework server, port 8000.
+		// Added 2026-06-17 (Cat RAG-framework-server survey).
+		//
+		// The generic "/api/chat" router is shared by many FastAPI chat apps,
+		// so a lone /api/chat match is the catchall-200 FP class. The
+		// create-llama server ALWAYS ships the PAIR /api/chat + /api/files
+		// (chat router + file-management router); the pair conjunction on the
+		// OpenAPI/Swagger surface is server-specific. Prefer the openapi.json
+		// path (structured) with /docs (Swagger HTML) as the OR fallback.
+		Name:         "LlamaIndex Server",
+		DefaultPorts: []int{8000, 80, 443, 3000},
+		Probes: []Probe{
+			// Structured surface: openapi.json carries the router path literals.
+			{Path: "/api/chat/config", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "starterQuestions"}, // create-llama chat-config key
+				{Type: "body_not_contains", Value: "llamaindex.ai"}, // anti marketing-site reflection
+			}},
+			// Swagger HTML fallback: the create-llama router PAIR is the anchor.
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "/api/chat"},  // chat router
+				{Type: "body_contains", Value: "/api/files"}, // file router — pair defeats generic /api/chat FP
+				{Type: "body_not_contains", Value: "llamaindex.ai"}, // anti marketing-site reflection
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Hayhooks (Haystack) — rag-framework pipeline server, ports 1416/1417
+		// (Hayhooks defaults) + 8000 (SHARED). Added 2026-06-17
+		// (Cat RAG-framework-server survey).
+		//
+		// /status on a real Hayhooks server returns {"status":"Up!","pipelines":[...]}.
+		// The literal "Up!" is hayhooks-unique (no other health endpoint emits
+		// that exact token); the pipelines array key is the second conjunct.
+		// "pipelines" alone is generic and is anchored ONLY WITH "Up!".
+		Name:         "Hayhooks",
+		DefaultPorts: []int{1416, 1417, 8000, 80, 443},
+		Probes: []Probe{
+			{Path: "/status", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: `"status":"up!"`}, // hayhooks-unique literal (case-insensitive match)
+				{Type: "json_field", Field: "pipelines"},          // pipelines key — second conjunct, gated by Up!
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Haystack REST API (legacy deepset server) — rag-framework server,
+		// port 8000 (SHARED). Added 2026-06-17 (Cat RAG-framework-server survey).
+		//
+		// /openapi.json info.title is exactly "Haystack REST API" — that title
+		// is the anchor. /initialized==true is generic and MUST be title-gated.
+		//
+		// NOTE: json_field does NOT descend into info.title (jHas is a flat
+		// top-level lookup). Closest expressible equivalent: json_field "info"
+		// (the parent key present) + body_contains `"Haystack REST API"` (the
+		// serialized title literal). The exact-equality semantics the spec asks
+		// for ("title EXACTLY") are not expressible — body_contains is a
+		// substring test — but the full title string is distinctive enough that
+		// substring containment is effectively the title match here.
+		Name:         "Haystack REST API",
+		DefaultPorts: []int{8000, 80, 443},
+		Probes: []Probe{
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "info"},                    // OpenAPI info object present
+				{Type: "body_contains", Value: `"Haystack REST API"`},  // title literal — the anchor (nested-key gap)
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Microsoft GraphRAG (accelerator / solution-accelerator server form
+		// only — the core library is CLI-only and gets NO fingerprint).
+		// Ports 443/80/8000/8080. Added 2026-06-17 (Cat RAG-framework-server survey).
+		//
+		// /manpage/openapi.json info.title is exactly "GraphRAG" (NOT the
+		// substring "graphrag", which would also catch LightRAG, which
+		// self-brands as a GraphRAG server and is the #1 false-positive). The
+		// accelerator-unique parameterized routes /graph/graphml/ and
+		// /source/report/ are the second anchor. LightRAG and its /webui are
+		// excluded at the matcher with body_not_contains.
+		//
+		// NOTE: two unexpressible constraints, both handled by the closest
+		// conjunctive marker-anchored equivalent:
+		//   1. info.title EXACTLY "GraphRAG" — json_field has no nested descent
+		//      and no value-equality. Expressed as json_field "info" (parent
+		//      present) + body_contains `"title":"GraphRAG"` (serialized exact
+		//      title pair, quote-bounded so it will NOT substring-match
+		//      "LightRAG" or "title":"GraphRAG Accelerator"-style variants as a
+		//      bare "graphrag"). The quote-bounded literal is the tightest the
+		//      substring engine allows.
+		//   2. route A OR route B — there is no within-probe disjunction. Two
+		//      probes express the OR: probe 1 anchors on /graph/graphml/,
+		//      probe 2 on /source/report/. Both carry the title + LightRAG/
+		//      webui exclusions so neither probe is a weaker gate.
+		Name:         "Microsoft GraphRAG",
+		DefaultPorts: []int{443, 80, 8000, 8080},
+		Probes: []Probe{
+			{Path: "/manpage/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "info"},                       // OpenAPI info object present
+				{Type: "body_contains", Value: `"title":"GraphRAG"`},      // exact title pair (nested-key + equality gap)
+				{Type: "body_contains", Value: "/graph/graphml/"},         // accelerator-unique route (anchor route A)
+				{Type: "body_not_contains", Value: "LightRAG"},            // #1 FP: LightRAG self-brands as GraphRAG server
+				{Type: "body_not_contains", Value: "/webui"},              // anti-LightRAG WebUI route
+			}},
+			// OR fallback: same identity, anchored on the /source/report/ route.
+			{Path: "/manpage/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "info"},
+				{Type: "body_contains", Value: `"title":"GraphRAG"`},
+				{Type: "body_contains", Value: "/source/report/"},         // accelerator-unique route (anchor route B)
+				{Type: "body_not_contains", Value: "LightRAG"},
+				{Type: "body_not_contains", Value: "/webui"},
 			}},
 		},
 		Severity: "high",
