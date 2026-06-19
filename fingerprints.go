@@ -5085,25 +5085,66 @@ var Fingerprints = []Fingerprint{
 
 	{
 		// Langflow — LangChain visual agent builder. Default port 7860 (Gradio/
-		// uvicorn). The {status, chat, db} triple on /api/v1/health_check is
-		// Langflow-exclusive (confirmed in langflow source: health_check returns
-		// exactly this three-key structure). DO NOT match on http.title:"Langflow"
-		// — the Shodan dork returns ~96k hits almost entirely from a marketing-
-		// site farm (false positive ratio near 100%). API body probes only.
+		// uvicorn).
+		//
+		// FALSE-POSITIVE HARDENING (Cat-Langflow survey 2026-06-18/19):
+		// http.title:"Langflow" returns ~54k Shodan hits that are ~100% a
+		// coordinated SCANNER-POISONING DECEPTION FLEET ("LBot"), NOT Langflow:
+		//   - Catch-all 200 on EVERY path, including nonsense /api/v1 paths, with
+		//     a ~135KB canned HTML page titled "LBot". That HTML contains the
+		//     substrings "chat", "db", and "status", so the old health_check
+		//     triple OVER-MATCHED the fleet on a non-JSON catch-all page.
+		//   - /api/v1/version returns a Gitea-shaped bait JSON:
+		//     {"version":"10.0.1+gitea-1.22.0",...} with NO "package" key and
+		//     NO "langflow" substring anywhere (it stuffs Gitea/TP-Link/JWT bait
+		//     for many scanners at once, but never fakes Langflow's own marker).
+		// Discriminator: REAL Langflow's GET /api/v1/version returns a JSON body
+		// that contains the vendor-unique pair "package":"Langflow". The fleet
+		// never fakes this pair. This is the only robust live signal.
+		//
+		// GUARD: any host that returns 200 on a nonsense /api/v1 path is a
+		// catch-all responder and MUST be excluded — the primary probe below is
+		// anchored so a catch-all 200 alone cannot satisfy it (it requires a
+		// parseable JSON body with a "package" key AND the "langflow" substring
+		// AND the absence of the fleet's "gitea" version string).
+		//
+		// DO NOT match on http.title:"Langflow" — see the FP ratio above.
 		Name:         "Langflow",
 		DefaultPorts: []int{7860, 80, 443},
 		Probes: []Probe{
-			// Three-key health_check body — Langflow-exclusive triple
+			// PRIMARY — vendor-unique. GET /api/v1/version must parse as JSON,
+			// carry the "package" key, contain the "langflow" substring, and NOT
+			// carry the LBot fleet's "gitea" version string. All four conditions
+			// are conjunctive, so the fleet's Gitea-shaped bait JSON (no package
+			// key, no "langflow", "...gitea-1.22.0" version) cannot fire this.
+			{Path: "/api/v1/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "package"},
+				{Type: "body_contains", Value: "langflow"},
+				{Type: "body_not_contains", Value: "gitea"},
+			}},
+			// SECONDARY (confirm-only, never sole). The {status, chat, db} triple
+			// is Langflow's health_check shape, but those three words also appear
+			// as plain substrings inside the LBot fleet's 135KB canned HTML, so
+			// this probe is hardened to require a parseable JSON object (real
+			// health_check is a small JSON body, the fleet page is HTML) and to
+			// reject the fleet's "gitea"/"LBot" tells. Use only to corroborate a
+			// PRIMARY hit, not to label a host on its own.
 			{Path: "/api/v1/health_check", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "status"},
 				{Type: "body_contains", Value: "chat"},
 				{Type: "body_contains", Value: "db"},
-				{Type: "body_contains", Value: "status"},
+				{Type: "body_not_contains", Value: "gitea"},
+				{Type: "body_not_contains", Value: "lbot"},
 			}},
-			// /api/v1/config returns JSON containing langflow_version field
+			// SECONDARY (confirm-only). /api/v1/config carries langflow_version on
+			// real instances; the fleet's catch-all returns its Gitea/JWT bait, so
+			// guard against the "gitea" tell here too.
 			{Path: "/api/v1/config", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "langflow_version"},
+				{Type: "body_not_contains", Value: "gitea"},
 			}},
 		},
 		Severity: "high",
