@@ -45,6 +45,85 @@ type Fingerprint struct {
 // ── Fingerprint database ────────────────────────────────────────────
 
 var Fingerprints = []Fingerprint{
+	// ── Document loaders / RAG ingest (Cat-Document-Loaders, 2026-06-19) ─────
+	// The unguarded front door of every RAG pipeline. All auth-off-by-default.
+	// Each anchors marker + status, with a catch-all-negative guard (LBot lesson,
+	// Insight #107/#108): the deception fleet returns 200+canned-JSON on any path,
+	// so a self-identifying marker alone is unsound at population scale.
+	{
+		// Apache Tika Server — GET /tika returns the exact greeting. No /version
+		// endpoint; version only in startup log -> CVE-2025-66516 (XXE 10.0)
+		// scoping needs a behavioral probe, recorded surface-open not exercised.
+		Name:         "Apache Tika",
+		DefaultPorts: []int{9998},
+		Probes: []Probe{
+			{Path: "/tika", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "This is Tika Server"},
+				{Type: "body_contains", Value: "Please PUT"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Gotenberg — Gotenberg-Trace correlation header on every API response is
+		// the load-bearing isolator on noisy port 3000. CVE-2026-40281 (ExifTool
+		// RCE 10.0) + SSRF->IMDS cluster (<8.32.0).
+		Name:         "Gotenberg",
+		DefaultPorts: []int{3000},
+		Probes: []Probe{
+			{Path: "/health", Matches: []MatchCond{
+				{Type: "header_contains", Field: "Gotenberg-Trace", Value: ""},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "header_contains", Field: "Gotenberg-Trace", Value: ""},
+			}},
+		},
+		Severity: "critical",
+	},
+	{
+		// GROBID — /api/isalive returns plain "true"; root console contains GROBID.
+		// /api/version gives clean git-describe version for CVE scoping. No direct
+		// CVE; unauth /api/modelTraining = compute-exhaustion DoS surface.
+		Name:         "GROBID",
+		DefaultPorts: []int{8070, 8071},
+		Probes: []Probe{
+			{Path: "/api/isalive", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "true"},
+				{Type: "body_not_contains", Value: "<html"},
+			}},
+		},
+		Severity: "medium",
+	},
+	{
+		// docling-serve (IBM/LF AI) — /openapi.json carries the vendor-unique
+		// convert/source path. Auth via DOCLING_SERVE_API_KEY (off default).
+		// CVE-2026-24009 (PyYAML RCE 8.1) via embedded docling-core 2.21.0-2.48.3.
+		Name:         "docling-serve",
+		DefaultPorts: []int{5001},
+		Probes: []Probe{
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "/v1/convert/source"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Unstructured API — /general/openapi.json title is unambiguous. Swagger at
+		// /general/docs (NOT /docs). Port 8000 extreme-noise -> anchor on title,
+		// not port. CVE-2025-64712 (path-trav->RCE 9.8) in the unstructured lib.
+		Name:         "Unstructured API",
+		DefaultPorts: []int{8000},
+		Probes: []Probe{
+			{Path: "/general/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Unstructured Pipeline API"},
+			}},
+		},
+		Severity: "high",
+	},
 	// ── LLM-app / RAG builders (Cat-34) ─────────────────────────
 	{
 		Name:         "Vanna",
