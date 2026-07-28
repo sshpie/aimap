@@ -1465,7 +1465,11 @@ var Fingerprints = []Fingerprint{
 	// Field-validated 2026-05-16 in the data-labeling survey.
 	{
 		Name:         "Label Studio",
-		DefaultPorts: []int{8080, 8081, 80, 443, 8000},
+		// DefaultPorts widened 2026-07-04 (cat-label-studio): the port-agnostic
+		// survey pipeline confirmed 49 live LS hosts on non-canonical ports the
+		// original {8080,8081,80,443,8000} set missed. Observed winning-port tail:
+		// 8085(10) 8090(9) 8888(5) 9090(5) 18080(4) 9001(3) 9000(2) 8443(1).
+		DefaultPorts: []int{8080, 8081, 80, 443, 8000, 8085, 8090, 8888, 9090, 18080, 9001, 9000, 8443},
 		Probes: []Probe{
 			// Modern v1.x API path
 			{Path: "/api/version", Matches: []MatchCond{
@@ -1476,6 +1480,16 @@ var Fingerprints = []Fingerprint{
 			{Path: "/version", Matches: []MatchCond{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "label-studio-backend"},
+			}},
+			// Modern v1.x /version — the -os- infix (label-studio-os-package)
+			// replaced the legacy label-studio-backend slug. Field-validated
+			// 2026-07-04 (cat-label-studio): /version is UNAUTHENTICATED and
+			// leaks exact release, git commit, and outdated flag on v1.22/1.23.
+			// Anchored: path + 200 + json_field release + unique v1.x marker.
+			{Path: "/version", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "release"},
+				{Type: "body_contains", Value: "label-studio-os-package"},
 			}},
 		},
 		Severity: "medium",
@@ -2909,6 +2923,84 @@ var Fingerprints = []Fingerprint{
 		},
 		Severity: "medium",
 	},
+
+	// ── Time-series databases (Cat-TSDB, 2026-07-28) ────────────────────
+	// TimescaleDB deliberately excluded: it's a Postgres extension with no
+	// bundled HTTP surface — no pre-auth fingerprint exists, confirmed via
+	// Step 0 Shodan harvest (product:PostgreSQL 0% precision, hostname/port
+	// dorks both null). Structural population-invisibility, not a gap.
+	{
+		Name: "InfluxDB",
+		// X-Influxdb-Version response header on /ping is the single canonical
+		// fingerprint — no other TSDB emits it. Version distribution field-
+		// validated 2026-07-28 (n=50): 48/50 on the v1.x line (auth-enabled=
+		// false factory default), only 2/50 on v2.x (mandatory onboarding
+		// wizard closes off the unauth tail). 27/50 clustered on exactly
+		// v1.6.4, 16/50 on v1.6.7~rc0 — template-propagation signature.
+		DefaultPorts: []int{8086},
+		Probes: []Probe{
+			{Path: "/ping", Matches: []MatchCond{
+				{Type: "status_code", Value: "204"},
+				{Type: "header_contains", Field: "X-Influxdb-Version", Value: ""},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "VictoriaMetrics",
+		// Root path serves the vmui web console with a distinctive title and
+		// brand string. Two-condition conjunctive match (status + two body
+		// substrings) per the naked-single-word lesson — "vmui" alone could
+		// theoretically collide, "VictoriaMetrics" alone could appear in an
+		// unrelated ops blog reflection; requiring both together is sound.
+		DefaultPorts: []int{8428},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "vmui"},
+				{Type: "body_contains", Value: "VictoriaMetrics"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "QuestDB",
+		// /exec is the primary attack-surface endpoint (arbitrary SQL exec)
+		// and doubles as the most reliable fingerprint: QuestDB's JSON
+		// response envelope (query/columns/dataset/count) is distinctive
+		// and doesn't collide with InfluxDB/TimescaleDB response shapes.
+		// Secondary probe on web-console root for hosts that block /exec.
+		DefaultPorts: []int{9000},
+		Probes: []Probe{
+			{Path: "/exec?query=SELECT+1", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "dataset"},
+				{Type: "json_field", Field: "columns"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "<title>QuestDB</title>"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		Name: "M3DB Coordinator",
+		// M3 Coordinator ships with zero auth subsystem in the config struct
+		// (not merely off-by-default — no toggle exists at all). Namespace
+		// enumeration doubles as fingerprint and finding: the registry.
+		// namespaces JSON envelope is unique to M3, and a 200 here already
+		// confirms unauth read access to cluster topology.
+		DefaultPorts: []int{7201},
+		Probes: []Probe{
+			{Path: "/api/v1/services/m3db/namespace", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "registry"},
+				{Type: "body_contains", Value: "namespaces"},
+			}},
+		},
+		Severity: "high",
+	},
 	{
 		Name:         "MinIO",
 		DefaultPorts: []int{9000},
@@ -2949,6 +3041,25 @@ var Fingerprints = []Fingerprint{
 	},
 
 	// ── AI agent platforms ──────────────────────────────────────
+
+	// Galileo agent-control — runtime guardrails / policy engine for AI agents.
+	// Port 8000, Next.js SPA. The /health endpoint returns {"status":"healthy","version":"0.1.0"}
+	// which is shared with ZenML and Chatterbox TTS — anchor on root-path body text instead.
+	// Zero auth on all endpoints by design (documented warning in README).
+	// DefaultPorts NOTE: ZenML probes /health at 8000 with body_contains "status" — that loose
+	// probe FP-fires here; the conjunctive root-path match below provides the discriminating signal.
+	{
+		Name:         "Galileo agent-control",
+		DefaultPorts: []int{8000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Runtime Guardrails for AI Agents"},
+			}},
+		},
+		Severity: "high",
+	},
+
 	{
 		Name:         "OpenHands",
 		DefaultPorts: []int{3000, 30000},
@@ -3491,6 +3602,53 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "/v1/rails/configs"},
 				{Type: "body_contains", Value: "openapi"},
+			}},
+		},
+		Severity: "high",
+	},
+	{
+		// Guardrails AI (guardrailsai.com) — the Guardrails CRUD API behind the
+		// Hub playground. Identification only: the OpenAPI spec self-describes as
+		// "Guardrails CRUD API" with the /guards CRUD surface. Anchors the exact
+		// vendor description (not the generic "Guardrails API" title, which is too
+		// weak) + the openapi json_field. Fires on any tier including the hardened
+		// prod API (api.simlab.*) where the data paths are 401. Severity low: this
+		// is service-presence, not exposure — the exposure FP below carries the risk.
+		// Founding host: playground.api.guardrailsai.com, Cat-33 2026-06-23.
+		Name:         "Guardrails AI API",
+		DefaultPorts: []int{443, 8000, 8080},
+		Probes: []Probe{
+			{Path: "/api-docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "openapi"},
+				{Type: "body_contains", Value: "Guardrails CRUD API"},
+			}},
+		},
+		Severity: "low",
+	},
+	{
+		// Guardrails AI playground — UNAUTH multi-tenant guard exposure. The
+		// playground tier serves GET /guards/ without auth, returning every user's
+		// guard objects keyed "playground-session-<provider>|<subject-id>"
+		// (google-oauth2 / github / auth0). The OpenAPI spec declares
+		// security:[ApiKeyAuth,BearerAuth] on this op — enforcement is just absent
+		// (missing middleware), so the open shape IS the finding, not the service.
+		// Conjunctive anchor: 200 + json_array + the vendor-unique session-key
+		// scheme + the guard-object "validators" field, with a catch-all-negative
+		// "<html" guard (LBot lesson, Insight #107/#108) so SPA/deception 200s that
+		// echo HTML on any path can't trip it. "playground-session-" alone is
+		// effectively un-FP-able but the guard keeps it sound at population scale.
+		// Founding host: playground.api.guardrailsai.com/guards/ (1335 objects /
+		// 992+ distinct subject IDs), Cat-33 2026-06-23.
+		Name:         "Guardrails AI Playground (unauth guards)",
+		DefaultPorts: []int{443, 8000, 8080},
+		Probes: []Probe{
+			{Path: "/guards/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_array"},
+				{Type: "body_contains", Value: "playground-session-"},
+				{Type: "body_contains", Value: "validators"},
+				{Type: "body_not_contains", Value: "<html"},
 			}},
 		},
 		Severity: "high",

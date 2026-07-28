@@ -102,8 +102,8 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"MLflow": enumMLflow,
 
 	// LLM proxy / gateway
-	"LiteLLM":  enumLiteLLM,
-	"One API":  enumOneAPI,
+	"LiteLLM": enumLiteLLM,
+	"One API": enumOneAPI,
 
 	// Data labeling / annotation
 	"Argilla": enumArgilla,
@@ -147,6 +147,10 @@ var enumeratorRegistry = map[string]enumeratorFn{
 	"OpenLIT":              enumOpenLIT,
 	"Pezzo":                enumPezzo,
 	"Prometheus":           enumPrometheus,
+
+	// Time-series databases (Cat-TSDB)
+	"InfluxDB": enumInfluxDB,
+	"QuestDB":  enumQuestDB,
 
 	// K8s FinOps / cost allocation
 	"Kubecost": enumKubecost,
@@ -1887,6 +1891,179 @@ func enumPrometheus(c *http.Client, svc ServiceMatch) EnumResult {
 			r.RawData["rules"] = m
 		}
 	}
+
+	return r
+}
+
+// ── Time-series databases (Cat-TSDB, 2026-07-28) ──────────────────────
+
+// influxQLNames walks the nested results[0].series[0].values shape InfluxDB
+// returns for SHOW DATABASES / SHOW MEASUREMENTS and pulls out column 0
+// (the name) from every row. Schema-only — never touches actual point data.
+func influxQLNames(body []byte) []string {
+	out := make([]string, 0)
+	m, err := parseJSON(body)
+	if err != nil {
+		return out
+	}
+	results, _ := m["results"].([]interface{})
+	if len(results) == 0 {
+		return out
+	}
+	first, _ := results[0].(map[string]interface{})
+	series, _ := first["series"].([]interface{})
+	if len(series) == 0 {
+		return out
+	}
+	s0, _ := series[0].(map[string]interface{})
+	values, _ := s0["values"].([]interface{})
+	for _, v := range values {
+		row, _ := v.([]interface{})
+		if len(row) == 0 {
+			continue
+		}
+		if name, ok := row[0].(string); ok && name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func enumInfluxDB(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	if st, hdr, _, err := httpGET(c, b+"/ping"); err == nil && st == 204 {
+		if v := hdr["X-Influxdb-Version"]; v != "" {
+			r.Version = v
+		}
+	}
+
+	// SHOW DATABASES — v1.x default install ships auth disabled; a 200
+	// here (vs 401 Unauthorized) is the auth-off-default confirmation.
+	st, _, body, err := httpGET(c, b+"/query?q="+urlQuery("SHOW DATABASES"))
+	if err != nil {
+		return r
+	}
+	if st == 401 || st == 403 {
+		r.AuthStatus = "auth-gated"
+		return r
+	}
+	if st != 200 {
+		return r
+	}
+	r.AuthStatus = "none"
+
+	dbNames := influxQLNames(body)
+	r.RawData["database_count"] = len(dbNames)
+	r.RawData["databases"] = dbNames
+	if len(dbNames) > 0 {
+		r.Findings = append(r.Findings, Finding{
+			Category: "unauth_data",
+			Title:    fmt.Sprintf("InfluxDB SHOW DATABASES readable unauth — %d databases disclosed", len(dbNames)),
+			Severity: "high",
+			Detail:   "GET /query?q=SHOW+DATABASES returned a 200 with no credentials. InfluxDB v1.x ships auth-enabled=false by factory default.",
+			Data:     dbNames,
+		})
+	}
+
+	// Schema-only follow-up: measurement names per database, capped at 5 dbs
+	// to stay within the restraint ethic (names ARE the finding, not rows).
+	measurementsByDB := make(map[string][]string)
+	cap := len(dbNames)
+	if cap > 5 {
+		cap = 5
+	}
+	for _, db := range dbNames[:cap] {
+		if db == "_internal" {
+			continue
+		}
+		mURL := b + "/query?db=" + urlQuery(db) + "&q=" + urlQuery("SHOW MEASUREMENTS")
+		if mst, _, mbody, merr := httpGET(c, mURL); merr == nil && mst == 200 {
+			names := influxQLNames(mbody)
+			if len(names) > 0 {
+				measurementsByDB[db] = names
+			}
+		}
+	}
+	if len(measurementsByDB) > 0 {
+		r.RawData["measurements_sample"] = measurementsByDB
+		r.Findings = append(r.Findings, Finding{
+			Category: "unauth_data",
+			Title:    "InfluxDB measurement schema readable unauth across sampled databases",
+			Severity: "medium",
+			Detail:   "SHOW MEASUREMENTS per database — measurement names only, no point/row data read.",
+			Data:     measurementsByDB,
+		})
+	}
+
+	return r
+}
+
+func enumQuestDB(c *http.Client, svc ServiceMatch) EnumResult {
+	r := mkResult(svc)
+	b := svc.BaseURL
+	r.AuthStatus = "unknown"
+
+	// SELECT 1 confirms the /exec SQL surface fires and is the FP check
+	// the fingerprint's dataset/columns envelope shape depends on.
+	st, _, body, err := httpGET(c, b+"/exec?query="+urlQuery("SELECT 1"))
+	if err != nil {
+		return r
+	}
+	if st == 401 || st == 403 {
+		r.AuthStatus = "auth-gated"
+		return r
+	}
+	if st != 200 {
+		return r
+	}
+	if m, jerr := parseJSON(body); jerr == nil {
+		if _, ok := m["dataset"]; !ok {
+			return r
+		}
+	} else {
+		return r
+	}
+	r.AuthStatus = "none"
+
+	r.Findings = append(r.Findings, Finding{
+		Category: "unauth_data",
+		Title:    "QuestDB /exec SQL endpoint reachable without authentication",
+		Severity: "critical",
+		Detail:   "GET /exec?query=... executes arbitrary SQL unauth (http.user/http.password unset by default — no credentials exist to disable). readonly defaults to false, so this includes INSERT/CREATE TABLE, not just SELECT.",
+	})
+
+	// SHOW TABLES — schema-only enumeration, no row data read.
+	st2, _, body2, err2 := httpGET(c, b+"/exec?query="+urlQuery("SHOW TABLES"))
+	if err2 == nil && st2 == 200 {
+		if m, jerr := parseJSON(body2); jerr == nil {
+			dataset, _ := m["dataset"].([]interface{})
+			tables := make([]string, 0, len(dataset))
+			for _, row := range dataset {
+				r0, _ := row.([]interface{})
+				if len(r0) > 0 {
+					if name, ok := r0[0].(string); ok && name != "" {
+						tables = append(tables, name)
+					}
+				}
+			}
+			if len(tables) > 0 {
+				r.RawData["table_count"] = len(tables)
+				r.RawData["tables"] = tables
+				r.Findings = append(r.Findings, Finding{
+					Category: "unauth_data",
+					Title:    fmt.Sprintf("QuestDB table list readable unauth — %d tables disclosed", len(tables)),
+					Severity: "high",
+					Detail:   "SHOW TABLES via unauth /exec — table names only, no row data read.",
+					Data:     tables,
+				})
+			}
+		}
+	}
+
+	r.Details = append(r.Details, "PGWire (8812) default-cred check (admin/quest) not exercised by this HTTP-only enumerator — separate protocol, flag for manual verification.")
 
 	return r
 }
