@@ -1,3 +1,3 @@
-module github.com/nuclide-research/aimap
+module github.com/zellkernel/aimap
 
 go 1.21

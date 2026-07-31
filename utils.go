@@ -188,7 +188,7 @@ func httpGETRaw(c *http.Client, url string) (int, map[string]string, []byte, err
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	req.Header.Set("User-Agent", "github.com/nuclide-research/aimap/"+Version+" (security-research)")
+	req.Header.Set("User-Agent", "github.com/zellkernel/aimap/"+Version+" (security-research)")
 	req.Header.Set("Accept", "application/json, text/html, */*")
 	resp, err := c.Do(req)
 	if err != nil {
@@ -208,7 +208,7 @@ func httpPOST(c *http.Client, url, contentType string, body []byte) (int, map[st
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	req.Header.Set("User-Agent", "github.com/nuclide-research/aimap/"+Version+" (security-research)")
+	req.Header.Set("User-Agent", "github.com/zellkernel/aimap/"+Version+" (security-research)")
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.Do(req)

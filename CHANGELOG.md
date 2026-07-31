@@ -2,6 +2,25 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [Unreleased] - 2026-06-23
+
+Cat-33 AI-Email-Guardrails survey: two Guardrails AI (guardrailsai.com) fingerprints added,
+closing a field-found fingerprint gap (the founding host returned "No AI/ML services identified"
+before this). Adds 5 regression tests (`fingerprints_guardrailsai_test.go`).
+
+### New fingerprints
+
+- **Guardrails AI API** (sev low) — service-presence via the OpenAPI `/api-docs` spec, anchored
+  on the vendor-unique description `"Guardrails CRUD API"` + the `openapi` json_field. Fires on
+  any tier, including the hardened prod API (`api.simlab.guardrailsai.com`, data paths 401).
+- **Guardrails AI Playground (unauth guards)** (sev high) — the finding shape: `GET /guards/`
+  returns a JSON array of every user's guard objects keyed
+  `playground-session-<provider>|<subject-id>` (google-oauth2 / github / auth0) with no auth,
+  despite the spec declaring `security:[ApiKeyAuth,BearerAuth]` on the op. Conjunctive anchor:
+  `200` + `json_array` + `playground-session-` + `validators` + a `<html` body_not_contains guard
+  (LBot lesson, Insight #107/#108) so SPA / deception catch-all 200s can't trip it. Founding host:
+  `playground.api.guardrailsai.com/guards/` (1335 objects / 992+ distinct subject IDs).
+
 ## [v1.9.53] - 2026-06-05
 
 Cat-03 Model Serving survey verification pass: four false-positive fingerprints fixed and one

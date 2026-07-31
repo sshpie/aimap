@@ -375,7 +375,7 @@ func mcpPost(c *http.Client, url, payload string) (int, map[string]string, []byt
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	req.Header.Set("User-Agent", "github.com/nuclide-research/aimap/"+Version+" (security-research)")
+	req.Header.Set("User-Agent", "github.com/zellkernel/aimap/"+Version+" (security-research)")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := c.Do(req)
