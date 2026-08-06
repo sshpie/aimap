@@ -107,6 +107,26 @@ var PortClasses = map[string][]int{
 		3000, 3001, 5173, 5174, 8000, 8001, 8080, 8081, 11434,
 	},
 
+	// Voice / speech AI — STT (Whisper/Vosk/FunASR/WeNet), TTS synthesis
+	// (Kokoro/Coqui/Piper/ChatTTS/F5/Orpheus/OpenTTS/MaryTTS/mimic3), voice
+	// cloning/conversion (RVC/Applio/GPT-SoVITS/so-vits-svc/OpenVoice/XTTS/
+	// VALL-E-X/Tortoise), and assistant stacks (Rhasspy/OVOS/Wyoming/Willow/
+	// LiveKit). Curated 2026-08-06 from the tome voice-tts-conversational
+	// corpus (56 platforms) by port frequency, not a raw union of all 61
+	// observed ports. Two shared HTTP entrypoints dominate — 7860 (Gradio,
+	// 17 platforms) and 8000 (FastAPI, 16) — so a port hit alone is weak;
+	// the voice fingerprints anchor a marker (gradio_config blob / brand
+	// string / /v1/audio/* path) on top. The long tail (2700 Vosk ws,
+	// 10095 FunASR wss, 10086 WeNet, 10200-10700 Wyoming JSONL, 19000
+	// Willow, 50051 Riva gRPC) is port-class-or-miss: one platform per port,
+	// wire-protocol, invisible to any generic HTTP sweep.
+	"voice": {
+		80, 443, 2700, 4123, 5000, 5002, 5005, 5500, 6006, 6969, 7851,
+		7860, 7865, 7880, 8000, 8001, 8020, 8080, 8181, 8501, 8880, 8888,
+		8899, 8998, 9000, 9090, 9872, 9880, 10086, 10095, 10200, 10300,
+		10400, 12101, 19000, 43001, 43007, 50051, 58003, 59125,
+	},
+
 	// Wide default — the existing 51-port catch-all kept here as a named
 	// profile for explicit selection.
 	"wide": {

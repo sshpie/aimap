@@ -4283,6 +4283,569 @@ var Fingerprints = []Fingerprint{
 		Severity: "critical",
 	},
 
+	// ── Voice / Audio AI gap-fill (Cat voice-tts-conversational, tome
+	//    reconciliation 2026-08-06) ──────────────────────────────────────
+	// 33 fingerprints scaffolded from the tome voice-tts-conversational
+	// corpus for platforms that had no aimap FP. All ship auth-off by
+	// default (tome auth=None on every one). Discipline: no naked single-word
+	// body_contains — every probe pins a structural build artifact (Gradio's
+	// embedded gradio_config blob, a Swagger /docs shell, a distinctive
+	// API operationId / model-id / SPA marker) plus the brand.
+	//
+	// The Gradio family (7860) is the dominant shape: the SPA embeds
+	// window.gradio_config (a build artifact witness). Brand + gradio_config
+	// is the same two-conjunct pattern the existing seed-vc/so-vits/RVC FPs
+	// use and that fingerprints_voice_test.go blesses.
+
+	// Applio — RVC fork, voice-cloning Gradio UI on the near-unique port 6969.
+	// The existing RVC WebUI FP body-matches "Applio" but its DefaultPorts
+	// omit 6969, so Applio deployments were being missed. Fraud class → high.
+	{
+		Name:         "Applio",
+		DefaultPorts: []int{6969, 7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "Applio"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Bark (suno-ai / bark-gui) — Gradio TTS. "bark" alone is a common word;
+	// anchor on gradio_config + the distinctive en_speaker_N history-prompt id.
+	{
+		Name:         "Bark TTS",
+		DefaultPorts: []int{7860, 5000, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "en_speaker_"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Bert-VITS2 — Gradio TTS. Brand string is distinctive; gradio_config
+	// kills the article/README brand-mention FP shape.
+	{
+		Name:         "Bert-VITS2",
+		DefaultPorts: []int{7860, 5000, 6006, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "Bert-VITS2"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Dia (Nari Labs) — Gradio TTS. "Dia" is far too generic alone; anchor on
+	// gradio_config + the unique app title "Nari Text-to-Speech".
+	{
+		Name:         "Dia TTS",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "Nari Text-to-Speech"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// EmotiVoice (netease-youdao) — FastAPI OpenAI-compat TTS (:8000) + a
+	// Streamlit demo (:8501). The openapi.json names the EmotiVoice-specific
+	// SpeechRequest model; the Streamlit page pins the streamlit build assets.
+	{
+		Name:         "EmotiVoice",
+		DefaultPorts: []int{8000, 8501, 80, 443},
+		Probes: []Probe{
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "SpeechRequest"},
+				{Type: "body_contains", Value: "/v1/audio/speech"},
+				{Type: "body_contains", Value: "response_format"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "EmotiVoice"},
+				{Type: "body_contains", Value: "streamlit"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// FunASR (Alibaba/ModelScope) — streaming ASR. Primary surface is
+	// WSS :10095/:10096 (JSON handshake mode=offline|online|2pass, streams
+	// PCM). aimap is HTTP-oriented and CANNOT confirm the WSS wire protocol —
+	// those ports route to Censys / TLS-banner / active-handshake discovery.
+	// The newer funasr-server exposes an HTTP FastAPI on :8000 (Swagger +
+	// OpenAI-compat /v1/audio/transcriptions); we fingerprint that surface.
+	{
+		Name:         "FunASR",
+		DefaultPorts: []int{8000, 10095, 10096, 80, 443},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "FunASR"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// GPT-SoVITS — few-shot voice cloning. Fraud class → high. The FastAPI
+	// runtime (987x/9880) exposes /docs whose Swagger names the project-unique
+	// set_gpt_weights / set_sovits_weights operations; the Gradio training UI
+	// carries the brand + gradio_config. The existing RVC FP body-matches
+	// "GPT-SoVITS" but its DefaultPorts omit the 987x range.
+	{
+		Name:         "GPT-SoVITS",
+		DefaultPorts: []int{9880, 9872, 9873, 9874, 9871, 80, 443},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "set_gpt_weights"},
+				{Type: "body_contains", Value: "set_sovits_weights"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "GPT-SoVITS"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Higgs Audio (bosonai) — OpenAI-compat TTS. /v1/models returns the
+	// higgs-audio model id owned_by bosonai — two co-occurring anchors that
+	// generic OpenAI-compat servers never both emit.
+	{
+		Name:         "Higgs Audio",
+		DefaultPorts: []int{8000, 80, 443},
+		Probes: []Probe{
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "higgs-audio"},
+				{Type: "body_contains", Value: "bosonai"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// IndexTTS (bilibili) — Gradio TTS.
+	{
+		Name:         "IndexTTS",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "IndexTTS"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// MaryTTS — legacy Java TTS server on :59125 (SHARED with mimic3, which
+	// the conjunctive brand markers disambiguate). Plain public TTS, no
+	// cloning / PII → low. Anchors on the unique MARY Web Client + the
+	// maryWebClient DOM id.
+	{
+		Name:         "MaryTTS",
+		DefaultPorts: []int{59125, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "MARY Web Client"},
+				{Type: "body_contains", Value: "maryWebClient"},
+			}},
+		},
+		Severity: "low",
+	},
+
+	// MegaTTS3 (ByteDance) — Gradio TTS.
+	{
+		Name:         "MegaTTS3",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "MegaTTS3"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// MeloTTS (MyShell) — FastAPI. /docs Swagger pins the MeloTTS-Docker-API
+	// /convert/tts route which is distinctive to this server wrapper.
+	{
+		Name:         "MeloTTS",
+		DefaultPorts: []int{8888, 8000, 80, 443},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "MeloTTS"},
+				{Type: "body_contains", Value: "convert/tts"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// MetaVoice (metavoice-src) — voice cloning, FastAPI on the near-unique
+	// port 58003. Fraud class → high. tome markers are weak (generic FastAPI
+	// title); the anchor is port 58003 + brand string in the openapi schema.
+	{
+		Name:         "MetaVoice",
+		DefaultPorts: []int{58003, 7861, 80, 443},
+		Probes: []Probe{
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "MetaVoice"},
+				{Type: "body_contains", Value: "/tts"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Mimic 3 (Mycroft) — Hypercorn TTS on :59125 (SHARED with MaryTTS).
+	// Plain public TTS → low. Anchors on the exact server tagline + Mycroft.
+	{
+		Name:         "Mimic 3",
+		DefaultPorts: []int{59125, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Mimic 3 text to speech server"},
+				{Type: "body_contains", Value: "Mycroft"},
+			}},
+		},
+		Severity: "low",
+	},
+
+	// NVIDIA Riva — enterprise ASR/TTS/NMT. Primary surface is gRPC :50051
+	// (nvidia.riva.* services, content-type application/grpc) which aimap
+	// CANNOT confirm over HTTP — that port routes to Censys / gRPC-reflection
+	// / active-handshake discovery. Best-effort HTTP probe: the optional
+	// metrics port (9000/9001, Triton backend) exposes Prometheus nv_inference_*
+	// counters. When present, that's a structural Riva/Triton witness.
+	{
+		Name:         "NVIDIA Riva",
+		DefaultPorts: []int{9000, 9001, 50051, 80, 443},
+		Probes: []Probe{
+			{Path: "/metrics", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "nv_inference_request"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// OpenTTS (synesthesiam) — Hypercorn TTS aggregator on :5500. Plain
+	// public TTS → low. Anchors on the exact project tagline.
+	{
+		Name:         "OpenTTS",
+		DefaultPorts: []int{5500, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "OpenTTS"},
+				{Type: "body_contains", Value: "Unifies access to multiple open source"},
+			}},
+		},
+		Severity: "low",
+	},
+
+	// OpenVoiceOS (OVOS) — open assistant stack. The messagebus on :8181 is a
+	// WebSocket; a plain HTTP GET /core returns 426 Upgrade Required from
+	// TornadoServer. /core is the OVOS-distinctive path; status 426 + the
+	// TornadoServer header + the /core path together form the anchor. The
+	// bus itself is a wire protocol and is not otherwise HTTP-probeable.
+	{
+		Name:         "OpenVoiceOS",
+		DefaultPorts: []int{8181, 18181, 80, 443},
+		Probes: []Probe{
+			{Path: "/core", Matches: []MatchCond{
+				{Type: "status_code", Value: "426"},
+				{Type: "body_contains", Value: "426 Upgrade Required"},
+				{Type: "header_contains", Field: "Server", Value: "TornadoServer"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Parler-TTS (HuggingFace) — Gradio TTS. Anchor on gradio_config + the
+	// parler_tts module / model id.
+	{
+		Name:         "Parler-TTS",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "parler-tts-mini"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Rhasspy — offline voice assistant (Hypercorn). Exposes profile/config +
+	// STT/TTS/intent surfaces. Anchors on the distinctive UI section labels.
+	{
+		Name:         "Rhasspy",
+		DefaultPorts: []int{12101, 12183, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Rhasspy"},
+				{Type: "body_contains", Value: "Wake Word"},
+				{Type: "body_contains", Value: "Intent Recognition"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Seed-VC — zero-shot voice conversion, Gradio. Fraud class → high.
+	{
+		Name:         "Seed-VC",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "Seed-VC"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// sherpa-onnx (k2-fsa) — ASR/TTS. Primary streaming surface is a raw
+	// WebSocket (sherpa-onnx-*-websocket-server) which aimap cannot confirm;
+	// the Python demo server DOES serve an HTTP web UI (streaming_record.html)
+	// whose page carries the "Next-gen Kaldi demo" title + repo slug. We
+	// fingerprint that HTTP surface.
+	{
+		Name:         "sherpa-onnx",
+		DefaultPorts: []int{6006, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Next-gen Kaldi demo"},
+				{Type: "body_contains", Value: "sherpa-onnx"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// so-vits-svc — singing/voice conversion, Gradio. Fraud class → high.
+	{
+		Name:         "so-vits-svc",
+		DefaultPorts: []int{7860, 5000, 6842, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "so-vits"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Spark-TTS (SparkAudio) — Gradio TTS with voice creation.
+	{
+		Name:         "Spark-TTS",
+		DefaultPorts: []int{7860, 8000, 8001, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "Spark-TTS"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Tortoise TTS (ai-voice-cloning fork) — Gradio voice cloning. "tortoise"
+	// alone is a common word; anchor on gradio_config + the fork's unique
+	// "ai-voice-cloning" app title. Fraud class → high.
+	{
+		Name:         "Tortoise TTS",
+		DefaultPorts: []int{7860, 5000, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "ai-voice-cloning"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Ultravox (fixie-ai) — real-time voice-agent platform. /api/calls exposes
+	// call objects (joinUrl, callId, transcripts, recordings) = PII surface
+	// when unauth. Gated instances (X-API-Key) will not 200 — surface open,
+	// access not exercised. Fallback: the OpenAI-compat /v1/models names the
+	// ultravox model. High.
+	{
+		Name:         "Ultravox",
+		DefaultPorts: []int{8000, 8080, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/calls", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "joinUrl"},
+				{Type: "body_contains", Value: "callId"},
+			}},
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "ultravox"},
+				{Type: "body_contains", Value: "object"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// VALL-E-X (Plachtaa) — zero-shot voice cloning, Gradio. Fraud → high.
+	{
+		Name:         "VALL-E-X",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "VALL-E"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Vosk — offline STT. PURE WIRE: a raw WebSocket on :2700 with NO path
+	// routing and NO HTTP surface. aimap is HTTP-oriented and cannot confirm
+	// the ws protocol; discovery routes to Censys / TLS-banner / active-ws
+	// handshake. The probe below is a best-effort placeholder that will NOT
+	// fire on a bare HTTP GET (correct — there is no HTTP body) and cannot
+	// false-positive; the Fingerprint exists for DefaultPorts + port-class
+	// registration and honest documentation of the wire-only limitation.
+	{
+		Name:         "Vosk",
+		DefaultPorts: []int{2700},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "\"partial\""},
+				{Type: "body_contains", Value: "\"result\""},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// WeNet — E2E ASR. Port :10086 multiplexes WebSocket (websocket_server_main),
+	// gRPC (grpc_server_main) and HTTP (http_server_main). aimap can only
+	// confirm the http_server_main mode, which serves the bundled web client
+	// (runtime/.../web/templates/index.html). The ws/gRPC modes are invisible
+	// to an HTTP sweep and route to Censys / banner / active-handshake.
+	{
+		Name:         "WeNet",
+		DefaultPorts: []int{10086, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "wenet"},
+				{Type: "body_contains", Value: "websocket"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// whisper_streaming (ufal) — real-time ASR. PURE WIRE: a raw TCP line
+	// protocol on :43007/:43001 (client streams 16kHz PCM, server emits
+	// "beg_ts end_ts text" lines). NOT HTTP — aimap cannot confirm it; the
+	// port routes to Censys / banner / active-socket handshake. Best-effort
+	// placeholder probe (will not fire over HTTP, cannot false-positive).
+	{
+		Name:         "whisper_streaming",
+		DefaultPorts: []int{43007, 43001},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "beg_ts"},
+				{Type: "body_contains", Value: "end_ts"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// WhisperFusion (Collabora) — real-time ASR+LLM+TTS. Serves an HTTP Web
+	// GUI on :8000 whose page names WhisperFusion + WhisperSpeech. The STT
+	// backend (WhisperLive ws) and TensorRT-LLM bridge are separate wire
+	// surfaces. Live-audio PII → high.
+	{
+		Name:         "WhisperFusion",
+		DefaultPorts: []int{8000, 6006, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "WhisperFusion"},
+				{Type: "body_contains", Value: "WhisperSpeech"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Willow Inference Server — self-hosted ASR/TTS for the Willow ESP32
+	// assistant, HTTPS on :19000. /api/docs is the Swagger UI; the page title
+	// carries the product name. Live-audio + assistant control → high.
+	{
+		Name:         "Willow Inference Server",
+		DefaultPorts: []int{19000, 80, 443},
+		Probes: []Probe{
+			{Path: "/api/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Willow Inference Server"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Wyoming protocol — Home Assistant voice satellite/service transport.
+	// PURE WIRE: newline-delimited JSON events over raw TCP across the
+	// :10200-10700 range (10200 tts, 10300 asr, 10400 wake, 10500 intent,
+	// 10700 satellite). NOT HTTP — aimap cannot confirm it; ports route to
+	// Censys / banner / active-JSONL handshake. Best-effort placeholder probe
+	// (will not fire over HTTP, cannot false-positive).
+	{
+		Name:         "Wyoming Protocol",
+		DefaultPorts: []int{10200, 10300, 10400, 10500, 10700},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "\"synthesize\""},
+				{Type: "body_contains", Value: "\"transcribe\""},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Zonos (Zyphra) — Gradio TTS.
+	{
+		Name:         "Zonos",
+		DefaultPorts: []int{7860, 80, 443},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "gradio_config"},
+				{Type: "body_contains", Value: "Zonos"},
+			}},
+		},
+		Severity: "medium",
+	},
+
 	// ── Embedding Services ──────────────────────────────────────────────
 
 	// HuggingFace Text Embeddings Inference (TEI) — canonical standalone
@@ -5809,6 +6372,247 @@ var Fingerprints = []Fingerprint{
 				{Type: "status_code", Value: "200"},
 				{Type: "body_contains", Value: "ROS Streamable Topic List"},
 				{Type: "body_contains", Value: "/stream?topic="},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// ── cat-voice-tts-agents (2026-08-04) ──────────────────────────────
+	// 10 new fingerprints for voice/conversational AI platforms.
+	// All probes conjunctive per Insight #6 / CLAUDE.md: status_code +
+	// json_field or multiple distinctive body_contains. Never naked keyword.
+
+	// AllTalk TTS — multi-engine TTS aggregator (Kokoro+XTTS+Piper). Port 7851.
+	// /api/ready returns {"status":"ready","message":"AllTalk TTS is Ready"}.
+	// CORS wildcard + allow_credentials:true = full CSRF surface unauth.
+	// /audiocache/{filename} path traversal candidate (directory listing).
+	{
+		Name:         "AllTalk TTS",
+		DefaultPorts: []int{7851, 7852},
+		Probes: []Probe{
+			{Path: "/api/ready", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "status"},
+				{Type: "body_contains", Value: "AllTalk"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "AllTalk"},
+				{Type: "body_contains", Value: "tts-generate"},
+			}},
+			{Path: "/api/voices", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "voices"},
+				{Type: "body_contains", Value: "alltalk"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// openedai-speech — OpenAI-compat TTS proxy (/v1/audio/speech). Port 8000/8080.
+	// Archived 2026-01-04: dependency freeze, XTTS v2 CVEs never patched.
+	// /v1/models returns JSON with owned_by:"openedai" — project-unique discriminator.
+	{
+		Name:         "openedai-speech",
+		DefaultPorts: []int{8000, 8080},
+		Probes: []Probe{
+			{Path: "/v1/models", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "data"},
+				{Type: "body_contains", Value: "openedai"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "openedai"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Fish Speech — zero-shot voice cloning TTS (fishaudio). Port 8080/8000.
+	// /docs Swagger UI contains "fish-speech" project slug.
+	// /v1/tts accepts msgpack — content-type: application/msgpack is project-unique.
+	// /v1/asr adds STT pivot on same unauth surface.
+	{
+		Name:         "Fish Speech",
+		DefaultPorts: []int{8080, 8000, 7860},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "fish-speech"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "info"},
+				{Type: "body_contains", Value: "fish"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "fishaudio"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// CosyVoice 2 — Alibaba 3-5s zero-shot voice clone. Port 50000 (canonical).
+	// Port 50000 is near-unique for this platform. /docs has "CosyVoice" in title.
+	// gRPC port 50051 also unauth with published protobuf defs (not HTTP — scanner skip).
+	{
+		Name:         "CosyVoice 2",
+		DefaultPorts: []int{50000, 9880},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "CosyVoice"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "info"},
+				{Type: "body_contains", Value: "cosyvoice"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "inference_zero_shot"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// StyleTTS2 — expressive TTS. Gradio UI (:7860) or FastAPI (:8000).
+	// Gradio root contains "StyleTTS 2" in title and page body.
+	// Gradio --share tunnel bypasses operator firewall rules (non-obvious risk).
+	{
+		Name:         "StyleTTS2",
+		DefaultPorts: []int{7860, 8000},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "StyleTTS 2"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "styletts"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Botpress — self-hosted conversational AI platform. Port 3000.
+	// /api/v1/admin/bots returns bot list; botId is often a predictable slug.
+	// CVE-2026-4984: POST /api/v1/messaging/webhooks/{token} — unauthenticated
+	// Twilio credential theft via forged webhook, zero operator interaction required.
+	// Workflow definitions contain embedded OpenAI/Anthropic API keys.
+	{
+		Name:         "Botpress",
+		DefaultPorts: []int{3000, 3001},
+		Probes: []Probe{
+			{Path: "/api/v1/admin/bots", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "bots"},
+			}},
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "Botpress"},
+				{Type: "body_contains", Value: "bp-web-widget"},
+			}},
+			{Path: "/api/v1/health", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "status"},
+				{Type: "body_contains", Value: "botpress"},
+			}},
+		},
+		Severity: "critical",
+	},
+
+	// pyAnnote diarization — GDPR Art.9 biometric exposure (speaker embeddings).
+	// HF_TOKEN harvest from container env → lateral movement into operator HuggingFace.
+	// Probe: /docs Swagger with "pyannote" + "diarize" — project-unique conjunction.
+	{
+		Name:         "pyAnnote diarization",
+		DefaultPorts: []int{8000, 5000},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "pyannote"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "paths"},
+				{Type: "body_contains", Value: "diarize"},
+			}},
+		},
+		Severity: "critical",
+	},
+
+	// WhisperX — Whisper + speaker diarization. Port 8000.
+	// Distinguishable from base Whisper by "word_segments" field in docs/schema.
+	// PYANNOTE_AUTH_TOKEN harvest from container env (same class as pyAnnote).
+	// fedirz/faster-whisper-server: API_KEY unset by default = auth disabled.
+	{
+		Name:         "WhisperX",
+		DefaultPorts: []int{8000, 9000},
+		Probes: []Probe{
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "whisperx"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "paths"},
+				{Type: "body_contains", Value: "word_segments"},
+			}},
+		},
+		Severity: "high",
+	},
+
+	// Silero VAD/STT — edge-deployed voice activity detection + transcription.
+	// Wyoming TCP :10400 injection into Home Assistant pipelines is the novel surface.
+	// HTTP wrapper distinguishable by "silero" in /openapi.json schema body.
+	{
+		Name:         "Silero VAD",
+		DefaultPorts: []int{8000, 10400},
+		Probes: []Probe{
+			{Path: "/openapi.json", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "json_field", Field: "info"},
+				{Type: "body_contains", Value: "silero"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "silero"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+		},
+		Severity: "medium",
+	},
+
+	// Moshi — Kyutai real-time full-duplex voice LLM. Port 8998.
+	// WebSocket server: plain HTTP GET returns 400/426; WS upgrade to /api/chat succeeds.
+	// authorized_ids enforcement only triggers when list non-empty — empty config bypasses.
+	// Gradio :7860 tunnel variant: share without token = ephemeral public endpoint.
+	{
+		Name:         "Moshi voice LLM",
+		DefaultPorts: []int{8998, 8088, 7860},
+		Probes: []Probe{
+			{Path: "/", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "kyutai"},
+			}},
+			{Path: "/docs", Matches: []MatchCond{
+				{Type: "status_code", Value: "200"},
+				{Type: "body_contains", Value: "moshi"},
+				{Type: "body_contains", Value: "swagger"},
+			}},
+			// 400 on plain HTTP GET to WS endpoint = liveness signal
+			{Path: "/api/chat", Matches: []MatchCond{
+				{Type: "status_code", Value: "400"},
+				{Type: "body_contains", Value: "kyutai"},
 			}},
 		},
 		Severity: "high",

@@ -2,7 +2,35 @@
 
 All notable changes to aimap are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
-## [Unreleased] - 2026-06-23
+## [Unreleased] - 2026-08-06
+
+Cat voice-tts-conversational tome reconciliation: 33 voice/audio fingerprints added, closing the
+gap between the aimap FP database and the tome `voice-tts-conversational` corpus. Scaffolded from
+the tome JSONs (default_ports, fingerprint_markers, api_paths). All ship auth-off by default.
+Adds 9 regression tests (`fingerprints_voice_gap_test.go`): positive-match + bare-brand-rejection
+pairs for GPT-SoVITS / Seed-VC / sherpa-onnx, plus a wire-only-honesty guard for Vosk.
+
+### New fingerprints
+
+- **Gradio family (7860, gradio_config + brand anchor):** Applio (high), Bark TTS, Bert-VITS2,
+  Dia TTS, IndexTTS, MegaTTS3, Parler-TTS, Spark-TTS, Zonos (medium); GPT-SoVITS, Seed-VC,
+  so-vits-svc, Tortoise TTS, VALL-E-X (high, voice-clone/conversion fraud class).
+- **HTTP API/Swagger-anchored:** EmotiVoice, MeloTTS, Higgs Audio (medium); FunASR, sherpa-onnx,
+  Ultravox, WhisperFusion, Willow Inference Server (high); MetaVoice (high); NVIDIA Riva (high,
+  best-effort `/metrics` `nv_inference_*` HTTP anchor).
+- **Legacy/edge TTS:** MaryTTS, Mimic 3 (low, both on shared :59125, disambiguated by brand),
+  OpenTTS (low), OpenVoiceOS (medium, `/core` 426 + TornadoServer header), Rhasspy (medium).
+- **Wire-protocol honesty (registered with DefaultPorts + best-effort placeholder + a Go comment
+  that the HTTP probe cannot confirm the wire protocol; discovery routes to Censys/banner/active
+  handshake):** Vosk (:2700 ws), WeNet (:10086 ws/gRPC/http, only http_server_main is probeable),
+  whisper_streaming (:43007 raw TCP), Wyoming Protocol (:10200-10700 JSONL). FunASR/Riva/sherpa-onnx
+  carry the same note for their wire ports alongside their real HTTP surface.
+
+Discipline: no naked single-word `body_contains` — every probe pins a structural build artifact
+(Gradio `gradio_config` blob, Swagger operationId, model-id, SPA marker) plus the brand.
+`port_classes.go` `voice` class left untouched.
+
+## [Unreleased-prev] - 2026-06-23
 
 Cat-33 AI-Email-Guardrails survey: two Guardrails AI (guardrailsai.com) fingerprints added,
 closing a field-found fingerprint gap (the founding host returned "No AI/ML services identified"
