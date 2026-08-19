@@ -1,3 +1,3 @@
-module github.com/zellkernel/aimap
+module github.com/sshpie/aimap
 
 go 1.21

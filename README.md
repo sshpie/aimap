@@ -6,10 +6,10 @@
 <h4 align="center">A fast vulnerability scanner for AI and machine-learning infrastructure.</h4>
 
 <p align="center">
-  <a href="https://github.com/zellkernel/aimap/releases"><img src="https://img.shields.io/github/v/release/zellkernel/aimap?style=flat-square" alt="release"></a>
-  <a href="https://github.com/zellkernel/aimap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zellkernel/aimap?style=flat-square" alt="license"></a>
+  <a href="https://github.com/sshpie/aimap/releases"><img src="https://img.shields.io/github/v/release/sshpie/aimap?style=flat-square" alt="release"></a>
+  <a href="https://github.com/sshpie/aimap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/sshpie/aimap?style=flat-square" alt="license"></a>
   <a href="https://golang.org"><img src="https://img.shields.io/badge/go-1.21%2B-00ADD8?style=flat-square&logo=go" alt="go"></a>
-  <a href="https://github.com/zellkernel/aimap/releases"><img src="https://img.shields.io/github/downloads/zellkernel/aimap/total?style=flat-square" alt="downloads"></a>
+  <a href="https://github.com/sshpie/aimap/releases"><img src="https://img.shields.io/github/downloads/sshpie/aimap/total?style=flat-square" alt="downloads"></a>
   <a href="https://"><img src="https://img.shields.io/badge/by--blue?style=flat-square" alt=""></a>
 </p>
 
@@ -50,18 +50,18 @@ Generic port scanners stop at the open port. aimap reads the service behind it. 
 # Installation
 
 ```bash
-go install -v github.com/zellkernel/aimap@latest
+go install -v github.com/sshpie/aimap@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/zellkernel/aimap
+git clone https://github.com/sshpie/aimap
 cd aimap
 go build -o aimap .
 ```
 
-Pre-built Linux amd64 and arm64 binaries are on the [releases page](https://github.com/zellkernel/aimap/releases). Requires Go 1.21 or later.
+Pre-built Linux amd64 and arm64 binaries are on the [releases page](https://github.com/sshpie/aimap/releases). Requires Go 1.21 or later.
 
 # Usage
 
