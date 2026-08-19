@@ -10,7 +10,7 @@
   <a href="https://github.com/zellkernel/aimap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zellkernel/aimap?style=flat-square" alt="license"></a>
   <a href="https://golang.org"><img src="https://img.shields.io/badge/go-1.21%2B-00ADD8?style=flat-square&logo=go" alt="go"></a>
   <a href="https://github.com/zellkernel/aimap/releases"><img src="https://img.shields.io/github/downloads/zellkernel/aimap/total?style=flat-square" alt="downloads"></a>
-  <a href="https://nuclide-research.com"><img src="https://img.shields.io/badge/by-NuClide-blue?style=flat-square" alt="NuClide"></a>
+  <a href="https://"><img src="https://img.shields.io/badge/by--blue?style=flat-square" alt=""></a>
 </p>
 
 <p align="center">
@@ -210,12 +210,12 @@ aimap does not authenticate to services, submit forms, POST data, execute exploi
 
 # Our other projects
 
-- [VisorLog](https://github.com/nuclide-research/visorlog) — finding ledger and ingest pipeline for AI-infra reports
-- [VisorGraph](https://github.com/nuclide-research/visorgraph) — cert-pivot to operator attribution
-- [tiptoe](https://github.com/nuclide-research/tiptoe) — quiet, congestion-controlled assessment for AI infrastructure
-- [BARE](https://github.com/nuclide-research/BARE) — semantic exploit-module ranking over scanner findings
-- [recongraph](https://github.com/nuclide-research/recongraph) — typed provenance graph for multi-source recon
+- [VisorLog](https://github.com/sshpie/visorlog) — finding ledger and ingest pipeline for AI-infra reports
+- [VisorGraph](https://github.com/sshpie/visorgraph) — cert-pivot to operator attribution
+- [tiptoe](https://github.com/sshpie/tiptoe) — quiet, congestion-controlled assessment for AI infrastructure
+- [BARE](https://github.com/sshpie/BARE) — semantic exploit-module ranking over scanner findings
+- [recongraph](https://github.com/sshpie/recongraph) — typed provenance graph for multi-source recon
 
 # License
 
-MIT. Part of the NuClide toolchain. Contact: [nuclide-research.com](https://nuclide-research.com)
+MIT. Part of the  toolchain. Contact: [](https://)

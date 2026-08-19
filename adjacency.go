@@ -12,7 +12,7 @@ package main
 // backend datastore for that MLflow tracker.
 //
 // Reference: published as Insight #20 at
-//   https://nuclide-research.com/methodology/insight-20-aimap-catalog-gaps/
+//   https:///methodology/insight-20-aimap-catalog-gaps/
 
 // AdjacencyMatch is emitted for each data-tier port that lives on a host
 // with at least one confirmed AI/ML service.

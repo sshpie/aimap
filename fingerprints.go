@@ -3875,7 +3875,7 @@ var Fingerprints = []Fingerprint{
 
 	// ── Adjacent (non-AI, noted for defender handoff) ───────────
 	// Docker Registry is not an AI service, but often co-deployed with
-	// AI stacks. Defender should hand off to nuclide-registry-recon.
+	// AI stacks. Defender should hand off to -registry-recon.
 	{
 		Name:         "Docker Registry",
 		DefaultPorts: []int{5000, 51000, 55000},
@@ -6152,7 +6152,7 @@ var Fingerprints = []Fingerprint{
 		// and recipients, scans outbound LLM-drafted email for PII / tone /
 		// prompt-injection-echo / hallucination / policy violations / etc.
 		// before delivery. Single-VM Docker Compose (Haraka MTA + Next.js +
-		// nginx) on Hetzner Helsinki. Opens a new NuClide subcategory:
+		// nginx) on Hetzner Helsinki. Opens a new  subcategory:
 		// AI-Email-Guardrails (siblings: AegisAI, Prompt Security email
 		// connectors, BeeSafe AI, Salus). Hardened auth-on-default posture.
 		// Operator: sluice.email, registered 2026-03-11 via Ascio DK.
@@ -6176,7 +6176,7 @@ var Fingerprints = []Fingerprint{
 	// Six fingerprints for the ROS ecosystem. Master brief:
 	// AI-LLM-Infrastructure-OSINT/data/platform-intel/cat-x-ros-osint-2026-06-09.md
 	// Academic anchor: Brown et al. 2018 (arxiv:1808.03322) — 100+ rosmasters
-	// in a single IPv4 scan, 70%+ on .edu. NuClide 2026 survey is the 8-year
+	// in a single IPv4 scan, 70%+ on .edu.  2026 survey is the 8-year
 	// follow-up. Auth-on-default tier: ALL Tier-A (structural, no auth shipped).
 	{
 		// Foxglove bridge — self-hosted WebSocket bridge serving ROS/ROS2 topic

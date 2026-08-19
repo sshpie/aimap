@@ -1,4 +1,4 @@
-# Maintainer: Nicholas Kloster <security@d5data.ai>
+# Maintainer:  <security@d5data.ai>
 
 pkgname=aimap
 pkgver=1.9.21

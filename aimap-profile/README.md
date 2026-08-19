@@ -155,4 +155,4 @@ MIT (same as aimap).
 
 ## Maintainer
 
-`security@d5data.ai` — Nicholas Michael Kloster / NuClide.
+`security@d5data.ai` — Nicholas Michael Kloster / .
