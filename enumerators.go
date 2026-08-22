@@ -4815,9 +4815,9 @@ func enumElasticsearch(c *http.Client, svc ServiceMatch) EnumResult {
 			"index_count":  len(indexNames),
 			"actor_class":  actorClass,
 			"references": []string{
-				"https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/case-studies/commercial/meow-multi-actor-campaign-scope-2026-05-17.md",
-				"https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/evidence/2026-05-17-meow-attribution/ransom-note-and-paste.md",
-				"https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/methodology/insight-29-overwhelming-prior-state-look-at-deltas-not-snapshots.md",
+				"https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/case-studies/commercial/meow-multi-actor-campaign-scope-2026-05-17.md",
+				"https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/evidence/2026-05-17-meow-attribution/ransom-note-and-paste.md",
+				"https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/methodology/insight-29-overwhelming-prior-state-look-at-deltas-not-snapshots.md",
 			},
 		}
 		if attrs != nil {

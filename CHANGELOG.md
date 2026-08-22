@@ -745,11 +745,11 @@ distribution: 5,121 / 7,720 hosts on :8080, 1,073 on :443).
 
 Severity: `high`. SETUP_OPEN substate (1.31% of the v2 population)
 should be flagged per VisorScuba rule AI.H6 — see
-github.com/Nicholas-Kloster/VisorScuba.
+github.com/sshpie/VisorScuba.
 
 Cross-reference: Insight #40 (auth-on-default thesis shifts rightward
 in successor OSS generations) at
-github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/methodology/.
+github.com/sshpie/AI-LLM-Infrastructure-OSINT/methodology/.
 v2 sub2api hardened the v1 publicly-readable pool-stats surface;
 **0 of 7,720 hosts had POOL_LEAK** in the survey.
 
@@ -1170,7 +1170,7 @@ unauth registries gave 33% Jetson attribution; the Shodan-broad population
 sample of 2,878 hosts gave 0.035% Jetson attribution. The very low yield
 amplifies the cost of missed signals — every internationalization gap is
 proportionally more impactful at population scale. Documented as
-[Insight #35](https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/methodology/insight-35-side-channel-attribution-high-precision-low-recall.md).
+[Insight #35](https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/methodology/insight-35-side-channel-attribution-high-precision-low-recall.md).
 
 ## [v1.9.14] - 2026-05-19
 
@@ -1590,7 +1590,7 @@ thesis.
 **Restraint coded in:** no POST to `/prompt`, `/sdapi/v1/txt2img`,
 `/sdapi/v1/img2img`, `/api/v1/queue/default/enqueue_batch`, or
 `/customnode/install`. Read-only metadata enumeration only — per the
-[METHODOLOGY restraint ethic](https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/tree/main/methodology).
+[METHODOLOGY restraint ethic](https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/tree/main/methodology).
 
 **Field validation:** `103.192.253.238:8575` (NVIDIA L40S, 1.08 TB RAM,
 ComfyUI 0.3.60, Python 3.11.11, PyTorch 2.6.0+cu126, argv exposed). Plus
@@ -1940,7 +1940,7 @@ Embedding services are **Shodan-dark** — TEI, infinity, and custom FastAPI emb
 
 **Threat class:** Compute theft (GPU/CPU at operator's expense) + embedding oracle (attacker pre-computes query vectors to probe downstream vector DBs without the embedding key). Severity elevated to high when paired with exposed vector DB on same host.
 
-Companion survey catalog: [`AI-LLM-Infrastructure-OSINT/shodan/queries/27-embedding-services.md`](https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/shodan/queries/27-embedding-services.md)
+Companion survey catalog: [`AI-LLM-Infrastructure-OSINT/shodan/queries/27-embedding-services.md`](https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/shodan/queries/27-embedding-services.md)
 
 ## [v1.6.0] — 2026-05-08
 
@@ -1977,7 +1977,7 @@ Voice-cloning (RVC / OpenVoice) and real-time voice-agent (Pipecat / Vocode) fin
 
 ### Methodology context
 
-Closes the Speech & Audio AI tier in [`FUTURE-SURVEYS.md`](https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/case-studies/commercial/FUTURE-SURVEYS.md). Companion query catalog at `shodan/queries/17-voice-audio-ai.md` and discovery runbook at `data/voice-audio-ai-discovery-runbook.sh` in the OSINT repo.
+Closes the Speech & Audio AI tier in [`FUTURE-SURVEYS.md`](https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/case-studies/commercial/FUTURE-SURVEYS.md). Companion query catalog at `shodan/queries/17-voice-audio-ai.md` and discovery runbook at `data/voice-audio-ai-discovery-runbook.sh` in the OSINT repo.
 
 **Wake Forest "WHISPER" FP class** documented in the survey-17 catalog. `whisper.phs.wakehealth.edu` is a federally-funded clinical research portal (ColdFusion-on-IIS) that surfaces in `http.title:"Whisper"` Shodan dorks via keyword collision — pure FP for voice/audio AI. Same lesson class as the Garak / Garakuta-no-Kamisama collision Session 9 caught: single-keyword title/html match is unsound at population scale. The aimap fingerprints here all use conjunctive `body_contains` anchored to the actual project name (`openai-whisper-asr-webservice`, `whisper.cpp`, `Retrieval-based-Voice-Conversion`, `pipecat`, etc.) to avoid this class of FP.
 
@@ -2002,7 +2002,7 @@ Specialty data layers — analytic / OLAP / NoSQL tier. Backward-compatible: no 
 
 ### Methodology context
 
-This release closes the Specialty data layers tier in [`FUTURE-SURVEYS.md`](https://github.com/Nicholas-Kloster/AI-LLM-Infrastructure-OSINT/blob/main/case-studies/commercial/FUTURE-SURVEYS.md). Cassandra CQL native protocol on port 9042 is **not** added to aimap — the CQL handshake is binary, not HTTP, and a proper protocol-strict OPTIONS-frame banner check belongs in the survey runbook (`data/specialty-data-layers-discovery-runbook.sh` in the OSINT repo). Adding tcp_send / binary_frame match types to aimap is a separate hardening pass, not blocking for this survey.
+This release closes the Specialty data layers tier in [`FUTURE-SURVEYS.md`](https://github.com/sshpie/AI-LLM-Infrastructure-OSINT/blob/main/case-studies/commercial/FUTURE-SURVEYS.md). Cassandra CQL native protocol on port 9042 is **not** added to aimap — the CQL handshake is binary, not HTTP, and a proper protocol-strict OPTIONS-frame banner check belongs in the survey runbook (`data/specialty-data-layers-discovery-runbook.sh` in the OSINT repo). Adding tcp_send / binary_frame match types to aimap is a separate hardening pass, not blocking for this survey.
 
 Port 9000 is collision-prone (ClickHouse native TCP, MinIO API, Pinot broker default, Whisper, etc.). The Apache Pinot Controller fingerprint discriminates via the conjunctive `clusterName` + `controllerHost` JSON field requirement — neither field appears on collision-class services.
 

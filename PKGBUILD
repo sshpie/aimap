@@ -6,10 +6,10 @@ pkgrel=1
 groups=('blackarch' 'blackarch-scanner' 'blackarch-recon' 'blackarch-networking')
 pkgdesc='Security scanner for AI and ML infrastructure. 120 fingerprints + 50 deep enumerators across LLM runtimes, vector databases, model servers, agent platforms, observability stacks, AI safety/guardrails, medical AI, and voice/audio AI. Surfaces unauthenticated services, exposed credentials, PII, and claimable admin states.'
 arch=('x86_64' 'aarch64')
-url='https://github.com/Nicholas-Kloster/aimap'
+url='https://github.com/sshpie/aimap'
 license=('MIT')
 makedepends=('go')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/Nicholas-Kloster/aimap/archive/v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/sshpie/aimap/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
